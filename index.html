@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>منصة الفرق المشاركة في المسابقات | أكاديمية سنابل التقنية</title>
+<link rel="icon" href="assets/favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/frappe-gantt@0.6.1/dist/frappe-gantt.css">
+<link rel="stylesheet" href="css/style.css">
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/frappe-gantt@0.6.1/dist/frappe-gantt.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="js/config.js"></script>
+<!-- محرر الأكواد يُحمَّل أخيراً حتى لا يتعارض مع المكتبات السابقة -->
+<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@google/model-viewer@3.4.0/dist/model-viewer.min.js"></script>
+</head>
+<body>
+
+<!-- ============ شاشة الدخول ============ -->
+<section id="login" class="login hidden">
+  <canvas id="login-bg"></canvas>
+  <form id="login-form" class="login-card">
+    <img src="assets/emblem.png" alt="" class="login-emblem">
+    <h1>منصة الفرق المشاركة في المسابقات</h1>
+    <p class="muted">أكاديمية سنابل التقنية — جذورٌ صامدة… وعقولٌ تُثمر</p>
+    <label>اسم المستخدم<input name="username" autocomplete="username" required dir="ltr"></label>
+    <label>كلمة السر<input name="password" type="password" autocomplete="current-password" required dir="ltr"></label>
+    <button class="btn gold big" type="submit">دخول</button>
+    <p id="login-err" class="err"></p>
+  </form>
+</section>
+
+<!-- ============ التطبيق ============ -->
+<div id="app" class="hidden">
+  <header class="topbar">
+    <button class="icon-btn only-mobile" id="menu-btn" title="القائمة">☰</button>
+    <div class="brand">
+      <img src="assets/emblem.png" alt="">
+      <div><b>منصة الفرق المشاركة في المسابقات</b><small>أكاديمية سنابل التقنية</small></div>
+    </div>
+    <select id="project-select" title="المشروع"></select>
+    <div class="top-actions">
+      <button class="hdr-btn" id="inbox-btn" title="صندوق الوارد: رسائل وتعميمات"><span class="bell">🔔</span><span id="inbox-badge" class="badge hidden">0</span></button>
+      <button class="hdr-btn" id="notes-btn" title="المشاكل والملاحظات"><span>📋</span><span id="notes-badge" class="badge hidden">0</span></button>
+      <div class="me"><span id="me-name"></span><small id="me-role"></small></div>
+      <button class="btn ghost sm" id="logout-btn">خروج</button>
+    </div>
+  </header>
+  <div class="layout">
+    <nav id="nav" class="sidebar"></nav>
+    <main id="main"></main>
+    <aside id="drawer" class="drawer"></aside>
+  </div>
+</div>
+
+<div id="modal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head"><h3 id="modal-title"></h3><button class="icon-btn" id="modal-close">✕</button></div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+<div id="toasts"></div>
+<div id="tip" class="tip hidden"></div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
