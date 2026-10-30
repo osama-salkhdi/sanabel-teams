@@ -1,7 +1,7 @@
 // =====================================================================
 //  منصة الفرق المشاركة في المسابقات — أكاديمية سنابل التقنية
 // =====================================================================
-import { loginBackground, farmScene, timelineScene } from "./three-views.js";
+import { loginBackground, farmScene, timelineScene, TL_COLORS, TL_PRIO } from "./three-views.js";
 import { createDemoClient, resetDemo } from "./demo.js";
 import { createFilesView } from "./files-view.js";
 
@@ -207,8 +207,8 @@ function selectProject(id) {
 
 // ---------------------------------------------------------------- التنقل
 const NAV = [
-  { sec: "الإدارة", admin: true, items: [["dashboard", "🏛️", "لوحة التحكم"], ["inbox", "📨", "الرسائل والتعميمات"], ["members", "👥", "الأعضاء والصلاحيات"]] },
-  { sec: "التواصل", member: true, items: [["inbox", "📨", "صندوق الوارد"]] },
+  { sec: "الإدارة", admin: true, items: [["dashboard", "🏛️", "لوحة التحكم"], ["inbox", "📨", "الرسائل والتعميمات"], ["members", "👥", "الأعضاء والصلاحيات"], ["videos", "🎬", "فيديو شرح عن المنصة"]] },
+  { sec: "التواصل", member: true, items: [["inbox", "📨", "صندوق الوارد"], ["videos", "🎬", "فيديو شرح عن المنصة"]] },
   { sec: "المشروع", items: [["overview", "📊", "نظرة عامة"], ["tasks", "✅", "المهام"], ["files", "🗂️", "ملفات المشروع"], ["plan", "🗓️", "الخطة ومخطط جانت"], ["timeline", "🌐", "الخط الزمني 3D"], ["activity", "🕓", "سجل العمل"]] },
   { sec: "المخزون المعرفي", items: [["research", "🔬", "أبحاث مهمة"], ["books", "📚", "كتب مهمة"], ["misc", "🧩", "منوعات"], ["parts", "🔩", "القطع المطلوبة"], ["contacts", "📇", "أرقام مهمة"]] },
   { sec: "التقارير", admin: true, items: [["reports", "🖨️", "التقارير والتقييم"]] },
@@ -219,7 +219,7 @@ function buildNav() {
   $("#menu-btn").onclick = () => $("#nav").classList.toggle("open");
 }
 const ADMIN_ONLY = ["dashboard", "members", "reports"];
-const NO_PROJECT = ["dashboard", "members", "inbox"];
+const NO_PROJECT = ["dashboard", "members", "inbox", "videos"];
 window.addEventListener("hashchange", () => { const v = location.hash.slice(1); if (v && v !== S.view && S.me) go(v, true); });
 function go(view, fromHash) {
   if (!VIEWS[view] || (ADMIN_ONLY.includes(view) && !isAdmin())) view = isAdmin() ? "dashboard" : "overview";
@@ -859,39 +859,34 @@ VIEWS.timeline = async (main) => {
     sb.from("goals").select("*").eq("project_id", S.pid).then(must),
     sb.from("tasks").select("*").eq("project_id", S.pid).then(must),
   ]);
-  const mode = S.tlLane || "member";
-  const team = teamOf();
-  const laneOf = (t) => mode === "member" ? (t.assignee ? pname(t.assignee) : "غير مسندة") : TYPES[t.type];
-  const lanes = mode === "member"
-    ? [...team.map((m) => m.full_name), ...(tasks.some((t) => !t.assignee || !team.some((m) => m.id === t.assignee)) ? ["غير مسندة"] : [])]
-    : Object.values(TYPES);
-  tasks.forEach((t) => { if (mode === "member" && t.assignee && !team.some((m) => m.id === t.assignee) && !lanes.includes(pname(t.assignee))) lanes.push(pname(t.assignee)); });
-  const items = tasks.map((t) => {
+  const team = teamOf(), who = S.tlWho || "";
+  const shown = tasks.filter((t) => !who || t.assignee === who);
+  const items = shown.map((t) => {
     const st = new Date(t.start_date || t.created_at), en = t.due_date ? new Date(t.due_date) : addDays(st, 2);
-    return { id: t.id, label: t.title, start: st, end: en < st ? addDays(st, 1) : en, status: t.status, priority: t.priority, lane: laneOf(t), progress: taskProg(t), overdue: isOverdue(t),
-      tip: `<b>${esc(t.title)}</b><br><span style="color:${STATUS_COLOR[t.status]}">●</span> ${STATUS[t.status]} · ${taskProg(t)}%<br>أولوية <b style="color:${PRIO_COLOR[t.priority]}">${PRIORITY[t.priority]}</b><br>👤 ${esc(pname(t.assignee))}<br>📅 ${fmtDate(t.start_date)} ← ${fmtDate(t.due_date)}${isOverdue(t) ? "<br>⏰ <b>متأخرة</b>" : ""}<br><small>انقر للفتح</small>` };
+    return { id: t.id, label: t.title, who: t.assignee ? pname(t.assignee) : "", start: st, end: en < st ? addDays(st, 1) : en, status: t.status, priority: t.priority, progress: taskProg(t), overdue: isOverdue(t),
+      tip: `<b>${esc(t.title)}</b><br><span style="color:${TL_COLORS[t.status]}">●</span> ${STATUS[t.status]} · ${taskProg(t)}%<br>أولوية <b style="color:${TL_PRIO[t.priority]}">${PRIORITY[t.priority]}</b><br>👤 ${esc(pname(t.assignee))}<br>📅 ${fmtDate(t.start_date)} ← ${fmtDate(t.due_date)}${isOverdue(t) ? "<br>⏰ <b>متأخرة</b>" : ""}<br><small>انقر للفتح</small>` };
   });
-  const gl = goals.filter((g) => g.start_date && g.end_date).map((g) => {
+  const gl = who ? [] : goals.filter((g) => g.start_date && g.end_date).map((g) => {
     const p = avg(tasks.filter((t) => t.goal_id === g.id).map(taskProg));
     return { label: g.title, start: new Date(g.start_date), end: new Date(g.end_date), progress: p, tip: `🎯 <b>${esc(g.title)}</b><br>${PERIODS[g.period]} · ${p}%<br>${fmtDate(g.start_date)} ← ${fmtDate(g.end_date)}` };
   });
-  main.innerHTML = head("🌐 الخط الزمني ثلاثي الأبعاد", "كل مهمة كبسولة زجاجية فوق موعدها: السائل بداخلها = نسبة الإنجاز، والقاعدة المضيئة = الأولوية · الأقواس الذهبية = الأهداف") + `
-    <div class="tl-wrap" id="tl-wrap">
+  main.innerHTML = head("🛣️ الخط الزمني ثلاثي الأبعاد", "طريق المشروع من البداية إلى خط النهاية: كل دبوس مهمة في موعد تسليمها · الرقم = نسبة الإنجاز · الشريط الذهبي على الحافة = مدة الهدف") + `
+    <div class="tl-wrap light" id="tl-wrap">
       <div class="three-d xl" id="tl3d"></div>
       <div class="tl-hud">
-        <div class="seg dark"><button class="${mode === "member" ? "on" : ""}" data-lane="member">👥 حسب الأعضاء</button><button class="${mode === "type" ? "on" : ""}" data-lane="type">🧩 حسب النوع</button></div>
+        <select id="tl-who" class="tl-sel"><option value="">👥 كل الأعضاء</option>${team.map((m) => `<option value="${m.id}" ${who === m.id ? "selected" : ""}>👤 ${esc(m.full_name)}</option>`).join("")}</select>
         <button class="btn3d" id="tl-today">📍 اليوم</button><button class="btn3d" id="tl-all">🌐 عرض كامل</button>
-        <button class="btn3d" id="tl-top">🗺️ من الأعلى</button><button class="btn3d" id="tl-lbl">🏷️ العناوين</button><button class="btn3d" id="tl-fs">⛶ ملء الشاشة</button>
+        <button class="btn3d" id="tl-top">🗺️ من الأعلى</button><button class="btn3d" id="tl-lbl">🏷️ البطاقات</button><button class="btn3d" id="tl-fs">⛶ ملء الشاشة</button>
       </div>
       <div class="tl-legend">
-        <div><b>الحالة (السائل)</b>${Object.entries(STATUS).map(([k, l]) => `<span><i style="background:${STATUS_COLOR[k]}"></i>${l}</span>`).join("")}</div>
-        <div><b>الأولوية (القاعدة)</b><span><i style="background:${PRIO_COLOR.high}"></i>عالية</span><span><i style="background:${PRIO_COLOR.med}"></i>متوسطة</span><span><i style="background:${PRIO_COLOR.low}"></i>منخفضة</span></div>
-        <div class="muted">🖱️ اسحب للتدوير · العجلة للتكبير · زر يمين للتحريك · ⭐ = منجزة · وميض أحمر = متأخرة</div>
+        <div><b>لون الدبوس</b>${Object.entries(STATUS).map(([k, l]) => `<span><i style="background:${TL_COLORS[k]}"></i>${l}</span>`).join("")}<span><i style="background:${TL_COLORS.overdue}"></i>متأخرة</span><span><i style="background:${TL_COLORS.goal}"></i>هدف</span></div>
+        <div><b>الحلقة النابضة</b><span><i style="background:${TL_PRIO.high}"></i>أولوية عالية</span><span><i style="background:${TL_PRIO.med}"></i>متوسطة</span><span><i style="background:${TL_PRIO.low}"></i>منخفضة</span></div>
+        <div class="muted">🖱️ اسحب للتدوير · العجلة للتكبير (بحدود) · زر يمين للتحريك · انقر على دبوس لفتح المهمة</div>
       </div>
     </div>`;
-  const tl = timelineScene($("#tl3d"), items, lanes, (it) => it.id && openTask(it.id), { goals: gl });
+  const tl = timelineScene($("#tl3d"), items, [], (it) => it.id && openTask(it.id), { goals: gl });
   S.cleanup.push(tl.dispose);
-  $$("[data-lane]").forEach((b) => (b.onclick = () => { S.tlLane = b.dataset.lane; render(); }));
+  $("#tl-who").onchange = (e) => { S.tlWho = e.target.value; render(); };
   $("#tl-today").onclick = tl.focusToday; $("#tl-all").onclick = tl.overview; $("#tl-top").onclick = tl.top;
   $("#tl-lbl").onclick = (e) => e.currentTarget.classList.toggle("off", !tl.toggleLabels());
   $("#tl-fs").onclick = () => (document.fullscreenElement ? document.exitFullscreen() : $("#tl-wrap").requestFullscreen?.());
@@ -1362,5 +1357,114 @@ VIEWS.contacts = async (main) => {
     a.click(); URL.revokeObjectURL(a.href);
   };
 };
+
+// ---------------------------------------------------------------- 🎬 فيديو شرح عن المنصة
+const MEDIA_BUCKET = "platform-media";
+const ytIdOf = (u) => (String(u || "").match(/(?:youtu\.be\/|[?&]v=|shorts\/|embed\/|live\/)([\w-]{11})/) || [])[1];
+const driveIdOf = (u) => (String(u || "").match(/\/(?:file\/d|folders)\/([\w-]{20,})/) || String(u || "").match(/[?&]id=([\w-]{20,})/) || [])[1];
+const KIND_LABEL = { youtube: "▶️ يوتيوب", drive: "📁 Google Drive", file: "💾 من الجهاز", link: "🔗 رابط" };
+async function videoSrc(v) {
+  if (v.kind === "file" && v.file_path) {
+    const { data } = await sb.storage.from(MEDIA_BUCKET).createSignedUrls([v.file_path], 3600 * 6);
+    return data?.[0]?.signedUrl || "";
+  }
+  return v.url || "";
+}
+async function playerHTML(v) {
+  if (v.kind === "youtube") { const id = ytIdOf(v.url); return id ? `<iframe src="https://www.youtube.com/embed/${id}?rel=0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen></iframe>` : ""; }
+  if (v.kind === "drive") { const id = driveIdOf(v.url); return id ? `<iframe src="https://drive.google.com/file/d/${id}/preview" allow="autoplay; fullscreen" allowfullscreen></iframe>` : ""; }
+  const src = await videoSrc(v);
+  if (v.kind === "file" || /\.(mp4|webm|ogg|mov)(\?|$)/i.test(src)) return `<video src="${esc(src)}" controls playsinline preload="metadata"></video>`;
+  return `<div class="vid-link"><span>🔗</span><a class="btn gold" href="${esc(src)}" target="_blank" rel="noopener">فتح الفيديو في نافذة جديدة</a></div>`;
+}
+const vThumb = (v) => v.kind === "youtube" && ytIdOf(v.url) ? `style="background-image:url(https://i.ytimg.com/vi/${ytIdOf(v.url)}/hqdefault.jpg)"` : "";
+VIEWS.videos = async (main) => {
+  const r = await sb.from("platform_videos").select("*").order("sort").order("created_at", { ascending: false });
+  if (r.error) {
+    main.innerHTML = head("🎬 فيديو شرح عن المنصة") + `<div class="card empty">${isAdmin() ? `⚙️ قسم الفيديو يحتاج تجهيزاً بسيطاً: شغّل ملف <b dir="ltr">supabase/videos.sql</b> مرة واحدة في Supabase ← SQL Editor ثم حدّث الصفحة.<br><small class="muted" dir="ltr">${esc(r.error.message)}</small>` : "لا توجد فيديوهات بعد"}</div>`;
+    return;
+  }
+  const vids = r.data || [];
+  const cur = vids.find((v) => v.id === S.vidSel) || vids[0];
+  const isNew = (v) => Date.now() - new Date(v.created_at) < 7 * 86400000;
+  main.innerHTML = head("🎬 فيديو شرح عن المنصة", isAdmin() ? "أضف فيديوهات تشرح للأعضاء طريقة استخدام المنصة — تظهر للجميع" : "فيديوهات من المشرف تشرح طريقة استخدام المنصة",
+    isAdmin() ? `<button class="btn gold pulse" id="vid-add">＋ إضافة فيديو</button>` : "") + (vids.length ? `
+    <div class="vid-layout">
+      <section class="vid-main card">
+        <div class="vid-player" id="vid-player"><div class="empty">⏳</div></div>
+        <div class="vid-info"><div class="row"><h3 style="margin:0">${esc(cur.title)}</h3>${isNew(cur) ? `<span class="tag red">جديد</span>` : ""}<span class="tag gold">${KIND_LABEL[cur.kind] || ""}</span>
+          <div class="spacer"></div><small class="muted">${fmtDate(cur.created_at)}</small></div>
+          ${cur.description ? `<p style="white-space:pre-wrap;margin:8px 0 0">${esc(cur.description)}</p>` : ""}
+          ${cur.kind === "drive" ? `<p class="muted" style="font-size:12.5px;margin:6px 0 0">💡 إن لم يظهر الفيديو: تأكد أن ملف Drive مشارك بخيار «أي شخص لديه الرابط».</p>` : ""}</div>
+      </section>
+      <aside class="vid-list">${vids.map((v, i) => `
+        <div class="vid-item ${v.id === cur.id ? "on" : ""}" data-vid="${v.id}">
+          <div class="vid-thumb ${v.kind}" ${vThumb(v)}><span>${v.id === cur.id ? "▶" : i + 1}</span></div>
+          <div class="vid-meta"><b>${esc(v.title)}</b><small>${KIND_LABEL[v.kind] || ""}${isNew(v) ? ` · <span style="color:#d9534f">جديد</span>` : ""}</small>
+            ${isAdmin() ? `<div class="vid-adm"><button class="icon-btn" data-vup="${v.id}" title="للأعلى" ${i ? "" : "disabled"}>▲</button><button class="icon-btn" data-vdown="${v.id}" title="للأسفل" ${i < vids.length - 1 ? "" : "disabled"}>▼</button>
+              <button class="icon-btn" data-vedit="${v.id}" title="تعديل">✏️</button><button class="icon-btn" data-vdel="${v.id}" title="حذف">🗑</button></div>` : ""}</div>
+        </div>`).join("")}</aside>
+    </div>` : `<div class="card empty" style="padding:60px 10px"><div style="font-size:54px">🎬</div><h3>${isAdmin() ? "لم تُضف أي فيديو بعد" : "لم يُضف المشرف فيديو شرح بعد"}</h3>${isAdmin() ? `<p>أضف رابط يوتيوب أو Google Drive، أو ارفع فيديو من جهازك (حتى 50MB)</p>` : ""}</div>`);
+  if (cur) $("#vid-player").innerHTML = await playerHTML(cur) || `<div class="empty">⚠️ رابط الفيديو غير صالح</div>`;
+  $$("[data-vid]").forEach((el) => (el.onclick = (e) => { if (e.target.closest(".vid-adm")) return; S.vidSel = el.dataset.vid; render(); }));
+  if (!isAdmin()) return;
+  $("#vid-add").onclick = () => videoForm();
+  $$("[data-vedit]").forEach((b) => (b.onclick = () => videoForm(vids.find((v) => v.id === b.dataset.vedit))));
+  $$("[data-vdel]").forEach((b) => (b.onclick = async () => {
+    const v = vids.find((x) => x.id === b.dataset.vdel); if (!confirmBox(`حذف الفيديو «${v.title}»؟`)) return;
+    try { if (v.file_path) await sb.storage.from(MEDIA_BUCKET).remove([v.file_path]); must(await sb.from("platform_videos").delete().eq("id", v.id)); toast("🗑 حُذف الفيديو"); render(); } catch (e) { fail(e); }
+  }));
+  const move = async (id, dir) => {
+    const i = vids.findIndex((v) => v.id === id), j = i + dir; if (j < 0 || j >= vids.length) return;
+    const order = vids.map((v) => v.id); [order[i], order[j]] = [order[j], order[i]];
+    try { for (let k = 0; k < order.length; k++) must(await sb.from("platform_videos").update({ sort: k }).eq("id", order[k])); render(); } catch (e) { fail(e); }
+  };
+  $$("[data-vup]").forEach((b) => (b.onclick = () => move(b.dataset.vup, -1)));
+  $$("[data-vdown]").forEach((b) => (b.onclick = () => move(b.dataset.vdown, 1)));
+};
+function videoForm(v = {}) {
+  const kind0 = v.kind || "youtube";
+  openModal(v.id ? "✏️ تعديل الفيديو" : "🎬 إضافة فيديو شرح", `<form class="mform">
+    <label>عنوان الفيديو<input name="title" required value="${esc(v.title)}" placeholder="مثال: كيف ترفع عملك على المهمة"></label>
+    <label>شرح مختصر (اختياري)<textarea name="description" style="min-height:70px">${esc(v.description)}</textarea></label>
+    <label>مصدر الفيديو</label>
+    <div class="vid-kinds">${[["youtube", "▶️ يوتيوب"], ["drive", "📁 Google Drive"], ["file", "💾 رفع من جهازي"]].map(([k, l]) => `<label class="vk"><input type="radio" name="kind" value="${k}" ${kind0 === k ? "checked" : ""}><span>${l}</span></label>`).join("")}</div>
+    <label id="vf-url">الرابط<input name="url" dir="ltr" value="${esc(v.url)}" placeholder="https://"></label>
+    <label id="vf-file" class="hidden">ملف الفيديو (MP4 أو WEBM، حتى 50MB)<input type="file" name="file" accept="video/*">${v.file_path ? `<small class="muted">اتركه فارغاً للإبقاء على الفيديو الحالي</small>` : ""}</label>
+    <p class="muted" id="vf-hint" style="font-size:13px"></p>
+    ${v.id ? "" : `<label class="row" style="color:var(--ink);gap:8px"><input type="checkbox" name="announce" checked style="width:auto"> إرسال تعميم للأعضاء بأن فيديو جديداً أُضيف</label>`}
+    <div class="form-actions"><span id="vf-busy" class="muted"></span><div class="spacer"></div><button class="btn" type="submit">حفظ</button></div></form>`, {
+    onOpen: (box) => {
+      const hint = { youtube: "الصق رابط الفيديو من يوتيوب (يمكن أن يكون «غير مُدرج Unlisted» حتى لا يراه غير الفريق).", drive: "ارفع الفيديو إلى Google Drive ← مشاركة ← «أي شخص لديه الرابط» ← انسخ الرابط والصقه هنا.", file: "الحد الأقصى 50MB. للفيديوهات الأطول استخدم يوتيوب أو Drive." };
+      const sync = () => { const k = box.querySelector("input[name=kind]:checked").value; $("#vf-url").classList.toggle("hidden", k === "file"); $("#vf-file").classList.toggle("hidden", k !== "file"); $("#vf-hint").textContent = hint[k]; };
+      $$("input[name=kind]", box).forEach((r) => (r.onchange = sync)); sync();
+    },
+    onSubmit: async (d, form) => {
+      const row = { title: d.title.trim(), description: d.description || null, kind: d.kind, url: null };
+      if (d.kind === "youtube") { if (!ytIdOf(d.url)) throw new Error("رابط يوتيوب غير صالح"); row.url = d.url.trim(); row.file_path = null; }
+      if (d.kind === "drive") { if (!driveIdOf(d.url)) throw new Error("رابط Google Drive غير صالح — يجب أن يحتوي على /file/d/"); row.url = d.url.trim(); row.file_path = null; }
+      if (d.kind === "file") {
+        const f = form.querySelector("input[name=file]").files[0];
+        if (f) {
+          if (!f.type.startsWith("video/")) throw new Error("الملف ليس فيديو");
+          if (f.size > 50 * 1024 * 1024) throw new Error(`حجم الفيديو ${(f.size / 1048576).toFixed(0)}MB — الحد 50MB. ارفعه على يوتيوب أو Drive وضع الرابط`);
+          $("#vf-busy").textContent = `⏳ جارِ رفع ${(f.size / 1048576).toFixed(1)}MB…`;
+          const path = `videos/${Date.now()}_${safeName(f.name)}`;
+          must(await sb.storage.from(MEDIA_BUCKET).upload(path, f, { contentType: f.type }));
+          if (v.file_path) await sb.storage.from(MEDIA_BUCKET).remove([v.file_path]);
+          row.file_path = path;
+        } else if (!v.file_path) throw new Error("اختر ملف الفيديو");
+      } else if (v.file_path) await sb.storage.from(MEDIA_BUCKET).remove([v.file_path]);
+      if (v.id) must(await sb.from("platform_videos").update(row).eq("id", v.id));
+      else {
+        const top = must(await sb.from("platform_videos").select("sort").order("sort").limit(1));
+        const saved = must(await sb.from("platform_videos").insert({ ...row, sort: (top[0]?.sort ?? 1) - 1, created_by: S.me.id }).select().single());
+        S.vidSel = saved.id;
+        if (d.announce) await sb.from("messages").insert({ kind: "announcement", sender: S.me.id, subject: "🎬 فيديو شرح جديد", body: `أُضيف فيديو جديد: «${row.title}»\nتجده في تبويب «🎬 فيديو شرح عن المنصة».`, project_id: null });
+      }
+      closeModal(); toast("✅ تم حفظ الفيديو"); render();
+    },
+  });
+}
 
 boot();

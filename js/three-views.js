@@ -424,178 +424,261 @@ export function farmScene(container, projects, { onSelect, onHover } = {}) {
   };
 }
 
-// ---------- الخط الزمني ثلاثي الأبعاد (تصميم «النهر الزمني» المضيء) ----------
-// items: {id, label, start, end, status, priority, lane, progress, overdue, tip}
+// ---------- الخط الزمني ثلاثي الأبعاد: «طريق الإنجاز» بدبابيس بالونية (ألوان الهوية) ----------
+// items: {id, label, who, start, end, status, priority, progress, overdue, tip}
 // goals: {label, start, end, progress, tip}
-export const TL_STATUS = { todo: 0x8fa39a, doing: 0xf2b544, review: 0x8b7cf6, done: 0x2fbf71 };
-export const TL_PRIORITY = { high: 0xff4d4f, med: 0x3b82f6, low: 0xf5c518 };
+export const TL_COLORS = { todo: "#9bb3a6", doing: "#c39a5c", review: "#4f9a72", done: "#1e4a38", goal: "#e3c18a", overdue: "#d9534f" };
+export const TL_PRIO = { high: "#d9534f", med: "#3c7fc4", low: "#e8b923" };
+function pinCard(lines, accent) {
+  const c = document.createElement("canvas"), g = c.getContext("2d"), W = 620, H = 210; c.width = W; c.height = H;
+  g.shadowColor = "rgba(30,74,56,.25)"; g.shadowBlur = 18; g.shadowOffsetY = 6;
+  g.fillStyle = "#fffdf9"; g.beginPath(); g.roundRect(12, 10, W - 24, H - 30, 26); g.fill();
+  g.shadowColor = "transparent"; g.fillStyle = accent; g.beginPath(); g.roundRect(W - 34, 10, 22, H - 30, [0, 26, 26, 0]); g.fill();
+  g.direction = "rtl"; g.textAlign = "right";
+  const [t1, t2, t3] = lines, x = W - 52;
+  g.fillStyle = "#1e4a38"; g.font = "800 46px Tajawal, sans-serif"; g.fillText(t1.length > 24 ? t1.slice(0, 23) + "…" : t1, x, 64);
+  g.fillStyle = "#6c7a72"; g.font = "600 34px Tajawal, sans-serif"; g.fillText(t2 || "", x, 112);
+  g.fillStyle = accent; g.font = "800 34px Tajawal, sans-serif"; g.fillText(t3 || "", x, 158);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
+  sp.scale.set(8.4, 8.4 * H / W, 1); sp.renderOrder = 6; return sp;
+}
+function pinFace(top, bottom, color) {
+  const c = document.createElement("canvas"), g = c.getContext("2d"), S = 256; c.width = c.height = S;
+  g.fillStyle = "#ffffff"; g.beginPath(); g.arc(S / 2, S / 2, S / 2 - 6, 0, Math.PI * 2); g.fill();
+  g.lineWidth = 10; g.strokeStyle = color; g.globalAlpha = 0.25; g.stroke(); g.globalAlpha = 1;
+  g.fillStyle = color; g.textAlign = "center"; g.textBaseline = "middle"; g.direction = "rtl";
+  g.font = `800 ${bottom ? 92 : 110}px Tajawal, sans-serif`; g.fillText(top, S / 2, bottom ? S / 2 - 22 : S / 2 + 6);
+  if (bottom) { g.font = "700 46px Tajawal, sans-serif"; g.fillText(bottom, S / 2, S / 2 + 62); }
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true }));
+  sp.scale.set(1.18, 1.18, 1); sp.renderOrder = 5; return sp;
+}
+function softShadow() {
+  const c = document.createElement("canvas"), g = c.getContext("2d"); c.width = c.height = 128;
+  const gr = g.createRadialGradient(64, 64, 4, 64, 64, 62); gr.addColorStop(0, "rgba(30,50,40,.45)"); gr.addColorStop(1, "rgba(30,50,40,0)");
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+  const tex = new THREE.CanvasTexture(c);
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
+  m.rotation.x = -Math.PI / 2; return m;
+}
 export function timelineScene(container, items, lanes, onClick, { goals = [] } = {}) {
-  const BG = 0x07140f;
-  const ctx = base(container, { camPos: [-10, 26, 46], bloom: true });
-  const { scene, camera, controls } = ctx;
-  scene.background = new THREE.Color(BG);
-  scene.fog = new THREE.Fog(BG, 140, 330);
-  scene.add(new THREE.HemisphereLight(0x9fe6c7, 0x0b1a14, 0.6));
+  const ctx = base(container, { camPos: [0, 30, 60], lights: false });
+  const { scene, camera, renderer, controls } = ctx;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  { const c = document.createElement("canvas"); c.width = 4; c.height = 256; const g = c.getContext("2d"), gr = g.createLinearGradient(0, 0, 0, 256);
+    gr.addColorStop(0, "#e9efe8"); gr.addColorStop(0.55, "#f7f0e7"); gr.addColorStop(1, "#f1e4d2"); g.fillStyle = gr; g.fillRect(0, 0, 4, 256);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; scene.background = t; }
+  scene.fog = new THREE.Fog(0xf3eadf, 120, 320);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0xd9c7ad, 1.15));
+  const sun = new THREE.DirectionalLight(0xfff2dc, 1.6);
+  sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.0005; sun.shadow.radius = 4;
+  scene.add(sun, sun.target);
 
   const DAY = 86400000, today = new Date(new Date().toDateString());
   const dates = [...items.flatMap((i) => [+i.start, +i.end]), ...goals.flatMap((g) => [+g.start, +g.end]), +today];
-  const min = Math.min(...dates) - 4 * DAY, max = Math.max(...dates) + 6 * DAY;
-  const days = (max - min) / DAY;
-  const LEN = Math.max(50, Math.min(150, days * 0.75));
-  const X = (d) => -LEN / 2 + ((+d - min) / (max - min)) * LEN;
-  const GAP = 7, nL = Math.max(lanes.length, 1);
-  const laneZ = (l) => (lanes.indexOf(l) - (nL - 1) / 2) * GAP;
-  const zFront = (nL * GAP) / 2 + 1.5, zBack = -(nL * GAP) / 2 - 1.5; // الأمام = جهة الكاميرا
+  const min = Math.min(...dates) - 3 * DAY, max = Math.max(...dates) + 5 * DAY, span = Math.max(max - min, 14 * DAY);
+  const days = span / DAY;
+  // طريق متعرّج يدخل إلى العمق (مثل الصورة)
+  const LEN = Math.max(90, Math.min(260, days * 1.5));
+  const turns = Math.max(2, Math.round(LEN / 34)), A = 14;
+  const pts = [];
+  for (let k = 0; k <= turns * 6; k++) { const t = k / (turns * 6); pts.push(new THREE.Vector3(Math.sin(t * Math.PI * turns) * A * (0.75 + 0.25 * Math.cos(t * 3)), 0, LEN / 2 - t * LEN)); }
+  const curve = new THREE.CatmullRomCurve3(pts, false, "centripetal");
+  const W = 6.6, TH = 0.45, NS = 600, sp = curve.getSpacedPoints(NS);
+  const frame = (u) => { const p = curve.getPointAt(u), t = curve.getTangentAt(u); const n = new THREE.Vector3(-t.z, 0, t.x).normalize(); return { p, t, n }; };
+  const uOf = (d) => Math.max(0, Math.min(1, (+d - min) / span));
 
-  // نجوم ذهبية وخضراء بالخلفية
-  { const N = 900, pos = new Float32Array(N * 3), col = new Float32Array(N * 3);
-    const c1 = new THREE.Color(0xd8b57f), c2 = new THREE.Color(0x5fd3a0);
-    for (let i = 0; i < N; i++) {
-      pos.set([(Math.random() - 0.5) * LEN * 2.4, 6 + Math.random() * 60, (Math.random() - 0.5) * 220], i * 3);
-      (Math.random() > 0.5 ? c1 : c2).toArray(col, i * 3);
+  // الأرض
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshStandardMaterial({ color: 0xf2e8da, roughness: 1 }));
+  ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+  { const ring = new THREE.Mesh(new THREE.CircleGeometry(LEN * 0.75, 64), new THREE.MeshStandardMaterial({ color: 0xe9f0e6, roughness: 1, transparent: true, opacity: 0.85 }));
+    ring.rotation.x = -Math.PI / 2; ring.position.y = 0.01; ring.scale.set(0.75, 1, 1); ring.receiveShadow = true; scene.add(ring); }
+
+  // جسم الطريق (شريط بسماكة)
+  { const pos = [], col = [], idx = [], cTop = new THREE.Color(0xdcd6cd), cMid = new THREE.Color(0xe8e3db), cSide = new THREE.Color(0xb9ae9f);
+    for (let i = 0; i <= NS; i++) {
+      const u = i / NS, { p, n } = frame(u);
+      const L = p.clone().addScaledVector(n, W / 2), R = p.clone().addScaledVector(n, -W / 2);
+      pos.push(L.x, TH, L.z, R.x, TH, R.z, L.x, 0, L.z, R.x, 0, R.z);
+      const c = cTop.clone().lerp(cMid, 0.5 + 0.5 * Math.sin(u * 40));
+      [c, c, cSide, cSide].forEach((cc) => col.push(cc.r, cc.g, cc.b));
+      if (i < NS) { const a = i * 4, b = a + 4;
+        idx.push(a, b, a + 1, a + 1, b, b + 1);            // السطح
+        idx.push(a + 2, b + 2, a, a, b + 2, b);            // الجانب الأيسر
+        idx.push(a + 1, b + 1, a + 3, a + 3, b + 1, b + 3); } // الجانب الأيمن
     }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.BufferAttribute(pos, 3)); g.setAttribute("color", new THREE.BufferAttribute(col, 3));
-    const stars = new THREE.Points(g, new THREE.PointsMaterial({ size: 0.25, vertexColors: true, transparent: true, opacity: 0.7 }));
-    scene.add(stars); ctx.onFrame((t) => (stars.rotation.y = Math.sin(t * 0.05) * 0.05)); }
+    const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+    g.setIndex(idx); g.computeVertexNormals();
+    const road = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75, side: THREE.DoubleSide }));
+    road.castShadow = true; road.receiveShadow = true; scene.add(road);
+    // حافتان بيضاوان + خط منقّط ذهبي
+    const edge = (off, color, w) => { const pp = [], ii = [];
+      for (let i = 0; i <= NS; i++) { const { p, n } = frame(i / NS), a = p.clone().addScaledVector(n, off - w / 2), b = p.clone().addScaledVector(n, off + w / 2);
+        pp.push(a.x, TH + 0.012, a.z, b.x, TH + 0.012, b.z); if (i < NS) { const k = i * 2; ii.push(k, k + 2, k + 1, k + 1, k + 2, k + 3); } }
+      const eg = new THREE.BufferGeometry(); eg.setAttribute("position", new THREE.Float32BufferAttribute(pp, 3)); eg.setIndex(ii); eg.computeVertexNormals();
+      const m = new THREE.Mesh(eg, new THREE.MeshStandardMaterial({ color, roughness: 0.6, side: THREE.DoubleSide })); m.receiveShadow = true; scene.add(m); };
+    edge(W / 2 - 0.28, 0xffffff, 0.16); edge(-W / 2 + 0.28, 0xffffff, 0.16);
+    const nd = Math.floor(curve.getLength() / 2.2), dg = new THREE.BoxGeometry(0.16, 0.03, 0.9), dm = new THREE.MeshStandardMaterial({ color: 0xc39a5c, roughness: 0.5 });
+    const dash = new THREE.InstancedMesh(dg, dm, nd), m4 = new THREE.Matrix4(), q = new THREE.Quaternion();
+    for (let i = 0; i < nd; i++) { const { p, t } = frame((i + 0.5) / nd); q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(t.x, t.z)); m4.compose(new THREE.Vector3(p.x, TH + 0.02, p.z), q, new THREE.Vector3(1, 1, 1)); dash.setMatrixAt(i, m4); }
+    scene.add(dash); }
 
-  // أرضية زجاجية داكنة + شبكة
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(LEN + 40, nL * GAP + 40),
-    new THREE.MeshStandardMaterial({ color: 0x0c2219, roughness: 0.35, metalness: 0.6 }));
-  floor.rotation.x = -Math.PI / 2; floor.position.y = -0.02; scene.add(floor);
-  const grid = new THREE.GridHelper(Math.max(LEN + 40, nL * GAP + 40), Math.round((LEN + 40) / 2), 0x1f6b50, 0x123a2c);
-  grid.material.transparent = true; grid.material.opacity = 0.35; scene.add(grid);
+  // أشجار زيتون/سرو صغيرة للزينة على الجانبين
+  { const R = rng(19), cone = new THREE.ConeGeometry(1, 1, 7), sph = new THREE.IcosahedronGeometry(1, 0), trunkG = new THREE.CylinderGeometry(0.12, 0.16, 1, 5);
+    const mC = new THREE.MeshStandardMaterial({ color: 0x4f7a55, roughness: 0.9, flatShading: true }), mO = new THREE.MeshStandardMaterial({ color: 0x8a9a5b, roughness: 0.9, flatShading: true }), mT = new THREE.MeshStandardMaterial({ color: 0x8a6a45, roughness: 1 });
+    const list = [];
+    for (let i = 0; i < 40; i++) { const u = R(), { p, n } = frame(u), side = R() < 0.5 ? -1 : 1, d = W / 2 + 11 + R() * 20; const x = p.x + n.x * d * side, z = p.z + n.z * d * side;
+      if (sp.some((q) => Math.hypot(q.x - x, q.z - z) < W / 2 + 9)) continue; list.push([x, z, R()]); }
+    list.forEach(([x, z, r]) => { const g = new THREE.Group(); g.position.set(x, 0, z); const s = 0.6 + r * 0.6;
+      const tr = new THREE.Mesh(trunkG, mT); tr.scale.set(s, s * 1.2, s); tr.position.y = 0.6 * s; g.add(tr);
+      const top = r < 0.5 ? new THREE.Mesh(cone, mC) : new THREE.Mesh(sph, mO);
+      if (r < 0.5) { top.scale.set(0.9 * s, 3.2 * s, 0.9 * s); top.position.y = 2.6 * s; } else { top.scale.set(1.5 * s, 1.1 * s, 1.5 * s); top.position.y = 1.9 * s; }
+      top.castShadow = true; tr.castShadow = true; g.add(top); scene.add(g); }); }
 
-  const glow = (color, intensity = 1.6, opacity = 1) => new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: intensity, transparent: opacity < 1, opacity, roughness: 0.4 });
+  // شواخص الأشهر
+  { const d0 = new Date(min); d0.setDate(1); d0.setMonth(d0.getMonth() + 1);
+    const stoneG = new THREE.BoxGeometry(0.9, 1.3, 0.5), capG = new THREE.BoxGeometry(1.0, 0.18, 0.6);
+    const stoneM = new THREE.MeshStandardMaterial({ color: 0xece3d4, roughness: 0.9 }), capM = new THREE.MeshStandardMaterial({ color: 0x2a6049, roughness: 0.6 });
+    for (let d = new Date(d0); +d <= max; d.setMonth(d.getMonth() + 1)) {
+      const { p, n, t } = frame(uOf(d)), side = d.getMonth() % 2 ? 1 : -1, o = p.clone().addScaledVector(n, side * (W / 2 + 1.4));
+      const st = new THREE.Mesh(stoneG, stoneM), cp = new THREE.Mesh(capG, capM); st.position.set(o.x, 0.65, o.z); cp.position.set(o.x, 1.35, o.z);
+      st.rotation.y = cp.rotation.y = Math.atan2(t.x, t.z); st.castShadow = true; scene.add(st, cp);
+      const lb = textSprite(d.toLocaleDateString("ar-SY-u-nu-latn", { month: "long", year: "numeric" }), { size: 0.85, bg: "rgba(30,74,56,.92)", color: "#f4e8d6" });
+      lb.position.set(o.x, 2.3, o.z); scene.add(lb);
+    } }
 
-  // مسارات الأعضاء
-  lanes.forEach((l, i) => {
-    const z = laneZ(l);
-    const strip = new THREE.Mesh(new THREE.BoxGeometry(LEN + 6, 0.02, 0.08), glow(i % 2 ? 0x2a8f68 : 0xc39a5c, 0.9, 0.55));
-    strip.position.set(0, 0.01, z); scene.add(strip);
-    for (let x = -LEN / 2 - 7; x < LEN / 2; x += 32) {
-      const lbl = textSprite("👤 " + l, { size: 1.25, bg: i % 2 ? "rgba(42,96,73,.92)" : "rgba(195,154,92,.95)" });
-      lbl.position.set(x, 0.9, z - GAP * 0.32); scene.add(lbl);
-    }
+  // البداية والنهاية
+  const gate = (u, text, color) => { const { p, n, t } = frame(u), g = new THREE.Group(); g.position.copy(p); g.rotation.y = Math.atan2(t.x, t.z);
+    const pm = new THREE.MeshStandardMaterial({ color, roughness: 0.5 }), post = new THREE.CylinderGeometry(0.18, 0.22, 4.6, 10);
+    for (const sx of [-1, 1]) { const m = new THREE.Mesh(post, pm); m.position.set(sx * (W / 2 + 0.3), 2.3, 0); m.castShadow = true; g.add(m); }
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(W + 1, 0.9, 0.25), pm); beam.position.y = 4.4; beam.castShadow = true; g.add(beam);
+    scene.add(g); const lb = textSprite(text, { size: 1.1, bg: "rgba(30,74,56,.95)", color: "#ffffff" }); lb.position.set(p.x, 5.8, p.z); scene.add(lb); };
+  gate(0.012, "🚩 البداية", 0x2a6049); gate(0.988, "🏁 خط النهاية", 0xc39a5c);
+
+  // «اليوم»: قوس ذهبي نابض + كرة مضيئة تقطع الطريق حتى اليوم
+  const uT = uOf(today);
+  { const { p, t } = frame(uT), arch = new THREE.Mesh(new THREE.TorusGeometry(W / 2 + 0.9, 0.22, 14, 60, Math.PI), new THREE.MeshStandardMaterial({ color: 0xd9534f, emissive: 0xd9534f, emissiveIntensity: 0.35, roughness: 0.4 }));
+    arch.position.set(p.x, TH, p.z); arch.rotation.y = Math.atan2(t.x, t.z) + Math.PI / 2; arch.castShadow = true; scene.add(arch);
+    const lb = textSprite("📍 اليوم", { size: 1.25, bg: "rgba(217,83,79,.95)", color: "#fff" }); lb.position.set(p.x, W / 2 + 2.6, p.z); scene.add(lb);
+    const halo = new THREE.Mesh(new THREE.RingGeometry(W / 2 + 0.6, W / 2 + 1.1, 48), new THREE.MeshBasicMaterial({ color: 0xd9534f, transparent: true, opacity: 0.4, depthWrite: false }));
+    halo.rotation.x = -Math.PI / 2; halo.position.set(p.x, TH + 0.03, p.z); scene.add(halo);
+    ctx.onFrame((tt) => { const k = 1 + 0.06 * Math.sin(tt * 3); arch.scale.set(k, k, k); halo.scale.setScalar(1 + 0.25 * ((tt * 0.8) % 1)); halo.material.opacity = 0.45 * (1 - ((tt * 0.8) % 1)); lb.position.y = W / 2 + 2.6 + Math.sin(tt * 2) * 0.15; });
+    const orb = new THREE.Mesh(new THREE.SphereGeometry(0.42, 20, 16), new THREE.MeshStandardMaterial({ color: 0xffe2a8, emissive: 0xc39a5c, emissiveIntensity: 1.2 }));
+    scene.add(orb); const light = new THREE.PointLight(0xffd59a, 6, 9); orb.add(light);
+    ctx.onFrame((tt) => { const k = ((tt * 0.12) % 1) * Math.max(uT, 0.02), { p: q } = frame(k); orb.position.set(q.x, TH + 0.55 + Math.abs(Math.sin(tt * 6)) * 0.12, q.z); });
+    // الجزء المقطوع من الطريق يتلوّن بالأخضر الفاتح
+    const done = []; const ii = []; const steps = Math.max(2, Math.round(NS * uT));
+    for (let i = 0; i <= steps; i++) { const { p: q, n } = frame((i / NS)), a = q.clone().addScaledVector(n, 0.9), b = q.clone().addScaledVector(n, -0.9);
+      done.push(a.x, TH + 0.008, a.z, b.x, TH + 0.008, b.z); if (i < steps) { const k = i * 2; ii.push(k, k + 2, k + 1, k + 1, k + 2, k + 3); } }
+    const dg = new THREE.BufferGeometry(); dg.setAttribute("position", new THREE.Float32BufferAttribute(done, 3)); dg.setIndex(ii); dg.computeVertexNormals();
+    scene.add(new THREE.Mesh(dg, new THREE.MeshStandardMaterial({ color: 0xbfd8c4, roughness: 0.8, transparent: true, opacity: 0.8, side: THREE.DoubleSide }))); }
+
+  // الأهداف: شريط ذهبي على حافة الطريق بطول مدة الهدف
+  goals.forEach((g, gi) => {
+    const u1 = uOf(g.start), u2 = Math.max(uOf(g.end), u1 + 0.004), side = gi % 2 ? 1 : -1, n1 = Math.max(2, Math.round((u2 - u1) * NS)), pp = [], ii = [];
+    for (let i = 0; i <= n1; i++) { const { p, n } = frame(u1 + (u2 - u1) * (i / n1)), a = p.clone().addScaledVector(n, side * (W / 2 + 0.25)), b = p.clone().addScaledVector(n, side * (W / 2 + 0.95));
+      pp.push(a.x, 0.06, a.z, b.x, 0.06, b.z); if (i < n1) { const k = i * 2; ii.push(k, k + 2, k + 1, k + 1, k + 2, k + 3); } }
+    const sg = new THREE.BufferGeometry(); sg.setAttribute("position", new THREE.Float32BufferAttribute(pp, 3)); sg.setIndex(ii); sg.computeVertexNormals();
+    const strip = new THREE.Mesh(sg, new THREE.MeshStandardMaterial({ color: 0xe3c18a, emissive: 0xc39a5c, emissiveIntensity: 0.15, roughness: 0.5, side: THREE.DoubleSide })); scene.add(strip);
+    ctx.onFrame((tt) => (strip.material.emissiveIntensity = 0.12 + 0.12 * (0.5 + 0.5 * Math.sin(tt * 2 + gi))));
   });
 
-  // محور الزمن الأمامي مع نبضة ضوء تجري عليه
-  const axis = new THREE.Mesh(new THREE.BoxGeometry(LEN + 6, 0.05, 0.12), glow(0xd8b57f, 2.2));
-  axis.position.set(0, 0.03, zFront); scene.add(axis);
-  const runner = new THREE.Mesh(new THREE.SphereGeometry(0.28, 16, 16), glow(0xfff1c9, 4));
-  scene.add(runner);
-  ctx.onFrame((t) => { const k = (t * 0.08) % 1; runner.position.set(-LEN / 2 - 3 + k * (LEN + 6), 0.25, zFront); });
-
-  // علامات الأشهر والأسابيع
-  const d0 = new Date(min); d0.setDate(1);
-  for (let d = new Date(d0); +d <= max; d.setMonth(d.getMonth() + 1)) {
-    if (+d < min) continue;
-    const x = X(d);
-    const line = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.02, zFront - zBack), glow(0xc39a5c, 1.2, 0.5));
-    line.position.set(x, 0.02, (zFront + zBack) / 2); scene.add(line);
-    const s = textSprite(d.toLocaleDateString("ar-SY-u-nu-latn", { month: "long", year: "numeric" }), { size: 1.4, bg: "rgba(10,30,22,.85)", color: "#f4e8d6" });
-    s.position.set(x, 1, zFront + 3); scene.add(s);
-  }
-  for (let t = min - (min % (7 * DAY)); t <= max; t += 7 * DAY) {
-    if (t < min) continue;
-    const tick = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.3, 0.04), glow(0xd8b57f, 1.5));
-    tick.position.set(X(t), 0.15, zFront); scene.add(tick);
-  }
-
-  // بوابة «اليوم»
-  const tx = X(today), R = (zFront - zBack) / 2 + 0.5;
-  const portal = new THREE.Mesh(new THREE.TorusGeometry(R, 0.12, 16, 96, Math.PI), glow(0xff6b5b, 3));
-  portal.rotation.y = Math.PI / 2; portal.position.set(tx, 0, (zFront + zBack) / 2); scene.add(portal);
-  const veil = new THREE.Mesh(new THREE.CircleGeometry(R, 64, 0, Math.PI), new THREE.MeshBasicMaterial({ color: 0xff6b5b, transparent: true, opacity: 0.06, side: THREE.DoubleSide, depthWrite: false }));
-  veil.rotation.y = Math.PI / 2; veil.position.copy(portal.position); scene.add(veil);
-  const tl = textSprite("اليوم", { size: 1.8, bg: "rgba(255,107,91,.95)" }); tl.position.set(tx, R + 1.4, (zFront + zBack) / 2); scene.add(tl);
-  ctx.onFrame((t) => { const k = 1 + Math.sin(t * 2.2) * 0.02; portal.scale.set(k, k, k); veil.material.opacity = 0.05 + Math.sin(t * 2.2) * 0.03; });
-
-  // الأهداف: أقواس ذهبية (مستوحاة من أقواس الشعار) تمتد على مدة الهدف
-  const pick = [];
-  goals.forEach((g, i) => {
-    const x1 = X(g.start), x2 = Math.max(X(g.end), x1 + 1), r = (x2 - x1) / 2, z = zBack - 2 - i * 2.2;
-    const ghost = new THREE.Mesh(new THREE.TorusGeometry(r, 0.07, 10, 96, Math.PI), glow(0xc39a5c, 0.6, 0.35));
-    ghost.position.set((x1 + x2) / 2, 0, z); scene.add(ghost);
-    if (g.progress > 0) {
-      const arc = new THREE.Mesh(new THREE.TorusGeometry(r, 0.16, 12, 96, Math.PI * (g.progress / 100)), glow(0xe8c27a, 2.6));
-      arc.rotation.y = Math.PI; arc.position.copy(ghost.position); scene.add(arc);
-    }
-    const hit = new THREE.Mesh(new THREE.TorusGeometry(r, 0.6, 6, 48, Math.PI), new THREE.MeshBasicMaterial({ visible: false }));
-    hit.position.copy(ghost.position); hit.userData = g; pick.push(hit); scene.add(hit);
-    const s = textSprite(`🎯 ${g.label} · ${g.progress}%`, { size: 1.3, bg: "rgba(195,154,92,.95)" });
-    s.position.set((x1 + x2) / 2, r + 1, z); scene.add(s);
-  });
-
-  // المهام: كبسولات زجاجية يمتلئ داخلها بنسبة الإنجاز، قاعدتها بلون الأولوية
-  const labels = [];
-  const H = 3.4;
-  const slots = {};
-  items.sort((a, b) => +a.end - +b.end).forEach((it, idx) => {
-    const x1 = X(it.start), x2 = Math.max(X(it.end), x1 + 0.3);
-    const key = it.lane; slots[key] ||= [];
-    let off = 0; const near = slots[key].filter((x) => Math.abs(x - x2) < 2.2).length;
-    off = [0, 1.8, -1.8, 3.2, -3.2][near % 5]; slots[key].push(x2);
-    const z = laneZ(it.lane) + off;
-    const sc = TL_STATUS[it.status] ?? 0xffffff, pc = it.status === "done" ? 0x2fbf71 : TL_PRIORITY[it.priority] ?? 0x3b82f6;
-    // شريط المدة على الأرض
-    const dur = new THREE.Mesh(new THREE.BoxGeometry(Math.max(0.3, x2 - x1), 0.06, 0.7), glow(sc, 0.9, 0.75));
-    dur.position.set((x1 + x2) / 2, 0.04, z); scene.add(dur);
-    const group = new THREE.Group(); group.position.set(x2, 0, z); scene.add(group);
-    // قاعدة بلون الأولوية
-    const baseRing = new THREE.Mesh(new THREE.CylinderGeometry(1.05, 1.15, 0.26, 48), glow(pc, 1.8));
-    baseRing.position.y = 0.13; group.add(baseRing);
-    // الكبسولة الزجاجية
-    const glass = new THREE.Mesh(new THREE.CapsuleGeometry(0.72, H, 8, 28),
-      new THREE.MeshPhysicalMaterial({ color: 0xd9fff0, transparent: true, opacity: 0.16, roughness: 0.05, metalness: 0.1, clearcoat: 1, depthWrite: false }));
-    glass.position.y = 0.75 + H / 2 + 0.3; group.add(glass);
-    // السائل الداخلي = نسبة الإنجاز
-    const fillH = Math.max(0.15, (H + 0.9) * (it.progress / 100));
-    const fill = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.52, fillH, 32), glow(sc, 2.2));
-    fill.position.y = 0.42 + fillH / 2; group.add(fill);
-    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 16), glow(pc, 3)); cap.position.y = 0.75 + H + 1.4; group.add(cap);
-    if (it.status === "done") {
-      const star = new THREE.Mesh(new THREE.OctahedronGeometry(0.5), glow(0xffd36b, 3.5));
-      star.position.y = H + 3; group.add(star);
-      ctx.onFrame((t) => { star.rotation.y = t * 2; star.position.y = H + 3 + Math.sin(t * 2 + idx) * 0.15; });
-    }
-    if (it.overdue) ctx.onFrame((t) => (baseRing.material.emissiveIntensity = 1 + Math.abs(Math.sin(t * 4)) * 3));
-    glass.userData = fill.userData = baseRing.userData = it; pick.push(glass, fill, baseRing);
-    const lbl = textSprite(it.label.length > 26 ? it.label.slice(0, 25) + "…" : it.label, { size: 0.95, bg: "rgba(8,24,18,.88)", color: "#f4e8d6" });
-    lbl.position.set(0, H + 4.2, 0); group.add(lbl); labels.push(lbl);
-    // ظهور متتابع + تمايل خفيف
-    group.scale.setScalar(0.001);
-    const delay = 0.4 + idx * 0.06;
-    ctx.onFrame((t) => {
-      if (t > delay && group.scale.x < 1) group.scale.setScalar(Math.min(1, group.scale.x + 0.05));
-      glass.position.y = 0.75 + H / 2 + 0.3 + Math.sin(t * 1.4 + idx) * 0.08;
+  // الدبابيس البالونية
+  const prof = [new THREE.Vector2(0, 0)];
+  for (let k = 0; k <= 28; k++) { const th = -1.05 + (k / 28) * (Math.PI / 2 + 1.05); prof.push(new THREE.Vector2(Math.cos(th), 2.25 + Math.sin(th))); }
+  const pinG = new THREE.LatheGeometry(prof, 48);
+  const pins = [], hits = [], labels = [];
+  const all = [
+    ...items.map((it) => ({ ...it, kind: "task", at: it.end })),
+    ...goals.map((g) => ({ ...g, kind: "goal", at: g.end, status: "goal", priority: "goal", who: "" })),
+  ].sort((a, b) => +a.at - +b.at);
+  const placed = [];
+  all.forEach((it, idx) => {
+    const u = uOf(it.at), near = placed.filter((x) => Math.abs(x - u) < 0.045).length; placed.push(u);
+    const off = [0, 5.2, -5.2, 10.4, -10.4, 15.6, -15.6][near % 7] * (it.kind === "goal" ? 1.25 : 1);
+    const { p, n } = frame(u), base0 = p.clone().addScaledVector(n, off), onRoad = Math.abs(off) < W / 2;
+    const color = it.kind === "goal" ? TL_COLORS.goal : it.overdue ? TL_COLORS.overdue : TL_COLORS[it.status] || TL_COLORS.todo;
+    const s = (it.kind === "goal" ? 1.55 : it.priority === "high" ? 1.2 : it.priority === "low" ? 0.9 : 1.05) * 2.1;
+    const root = new THREE.Group(); root.position.set(base0.x, onRoad ? TH : 0, base0.z); scene.add(root);
+    const sh = softShadow(); sh.scale.set(2.2 * s, 1.4 * s, 1); sh.position.y = 0.02; root.add(sh);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.55 * s, 0.78 * s, 40), new THREE.MeshBasicMaterial({ color: it.kind === "goal" ? 0xc39a5c : new THREE.Color(TL_PRIO[it.priority] || "#c39a5c"), transparent: true, opacity: 0.9, depthWrite: false }));
+    ring.rotation.x = -Math.PI / 2; ring.position.y = 0.03; root.add(ring);
+    const body = new THREE.Group(); body.scale.setScalar(s); root.add(body);
+    const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(color), roughness: 0.32, metalness: 0.05, emissive: new THREE.Color(color), emissiveIntensity: 0.05 });
+    const pin = new THREE.Mesh(pinG, mat); pin.castShadow = true; body.add(pin);
+    const gloss = new THREE.Mesh(new THREE.SphereGeometry(0.28, 12, 10), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35 })); gloss.position.set(-0.45, 2.85, 0.55); body.add(gloss);
+    const d = new Date(it.at);
+    const face = it.kind === "goal" ? pinFace("🎯", null, "#8a6430") : it.status === "done" ? pinFace("✓", `${d.getDate()}/${d.getMonth() + 1}`, color) : pinFace(`${it.progress}%`, `${d.getDate()}/${d.getMonth() + 1}`, color);
+    body.add(face);
+    const card = pinCard(it.kind === "goal" ? [`🎯 ${it.label}`, `هدف · ينتهي ${d.getDate()}/${d.getMonth() + 1}`, `${it.progress}% منجز`] : [it.label, `👤 ${it.who || "غير مسندة"}`, `${it.overdue ? "⏰ متأخرة · " : ""}${it.progress}%`], color);
+    card.position.set(0, 3.4 * s + 2.1, 0); root.add(card); labels.push(card);
+    const hit = new THREE.Mesh(new THREE.CylinderGeometry(1.15 * s, 0.5 * s, 3.5 * s, 10), new THREE.MeshBasicMaterial({ visible: false })); hit.position.y = 1.75 * s; hit.userData = it; root.add(hit); hits.push(hit);
+    const ph = idx * 0.7, st = { hover: 0, h: 0 };
+    root.userData = st;
+    root.scale.setScalar(0.001);
+    ctx.onFrame((tt) => {
+      if (tt > 0.3 + idx * 0.05 && root.scale.x < 1) root.scale.setScalar(Math.min(1, root.scale.x + 0.06));
+      st.h += ((st.hover ? 1 : 0) - st.h) * 0.15;
+      const bob = Math.sin(tt * 2 + ph) * 0.12 * s + st.h * 0.5 * s;
+      body.position.y = bob; card.position.y = 3.4 * s + 2.1 + bob;
+      const pul = 1 + (it.overdue ? 0.07 : 0.035) * Math.sin(tt * (it.overdue ? 6 : 2.6) + ph) + st.h * 0.12;
+      body.scale.setScalar(s * pul); sh.scale.set(2.2 * s * (1 - bob * 0.15), 1.4 * s * (1 - bob * 0.15), 1);
+      mat.emissiveIntensity = 0.05 + st.h * 0.25 + (it.overdue ? 0.2 * (0.5 + 0.5 * Math.sin(tt * 6)) : 0);
+      ring.scale.setScalar(1 + 0.3 * ((tt * 0.7 + ph) % 1)); ring.material.opacity = 0.9 * (1 - ((tt * 0.7 + ph) % 1));
+      // وجه الدبوس يواجه الكاميرا دائماً
+      const c = body.worldToLocal(camera.position.clone()); c.y = 0; c.normalize().multiplyScalar(1.22); face.position.set(c.x, 2.25, c.z);
     });
+    pins.push({ it, root, u });
   });
-  if (!items.length && !goals.length) { const s = textSprite("لا توجد مهام بتواريخ بعد", { size: 1.4 }); s.position.y = 3; scene.add(s); }
+  if (!all.length) { const s0 = textSprite("لا توجد مهام بتواريخ بعد — أضف مهمة لتظهر على الطريق", { size: 1.4 }); s0.position.set(0, 4, 0); scene.add(s0); }
 
-  // كاميرا: حركة دخول سينمائية + تنقل سلس
-  controls.target.set(0, 1, 0); controls.maxDistance = Math.min(LEN * 1.05 + nL * 4, 170); controls.minDistance = 8;
-  controls.minPolarAngle = 0.15; controls.screenSpacePanning = false; controls.zoomSpeed = 0.8;
-  scene.fog.near = controls.maxDistance * 1.1; scene.fog.far = controls.maxDistance * 2.6;
-  controls.addEventListener("change", () => { const t = controls.target;
-    t.x = Math.max(-LEN / 2 - 8, Math.min(LEN / 2 + 8, t.x)); t.z = Math.max(zBack - 8, Math.min(zFront + 8, t.z)); t.y = Math.max(0, Math.min(8, t.y)); });
-  const ovCam = () => new THREE.Vector3(-LEN * 0.08, 13 + nL * 1.5, LEN * 0.3 + nL * 4.5), ovTgt = () => new THREE.Vector3(-LEN * 0.05, 1.5, -2);
+  // الإضاءة والظلال تغطي الطريق
+  const box = new THREE.Box3().setFromPoints(sp), size = box.getSize(new THREE.Vector3()), mid = box.getCenter(new THREE.Vector3());
+  const R0 = Math.max(size.x, size.z) / 2 + 15;
+  sun.position.set(mid.x - R0 * 0.5, R0 * 1.1, mid.z + R0 * 0.6); sun.target.position.copy(mid);
+  Object.assign(sun.shadow.camera, { left: -R0, right: R0, top: R0, bottom: -R0, near: 1, far: R0 * 4 }); sun.shadow.camera.updateProjectionMatrix();
+
+  // الكاميرا: حدود تمنع الضياع
+  const ext = Math.max(size.x, size.z);
+  controls.minDistance = 10; controls.maxDistance = Math.min(ext * 1.15 + 25, 260);
+  controls.minPolarAngle = 0.12; controls.maxPolarAngle = 1.38; controls.screenSpacePanning = false; controls.zoomSpeed = 0.85;
+  controls.addEventListener("change", () => { const t = controls.target; t.x = Math.max(box.min.x - 8, Math.min(box.max.x + 8, t.x)); t.z = Math.max(box.min.z - 8, Math.min(box.max.z + 8, t.z)); t.y = Math.max(0, Math.min(6, t.y)); });
+  const s0 = curve.getPointAt(0);
+  const ovCam = () => new THREE.Vector3(mid.x + ext * 0.08, ext * 0.36 + 16, box.max.z + ext * 0.22 + 18), ovTgt = () => new THREE.Vector3(mid.x, 0, mid.z - ext * 0.05);
   let goalCam = ovCam(), goalTgt = ovTgt(), moving = true;
-  camera.position.set(-LEN * 0.6, 60, LEN * 1.1);
-  ctx.onFrame(() => {
-    if (!moving) return;
-    camera.position.lerp(goalCam, 0.045); controls.target.lerp(goalTgt, 0.045);
-    if (camera.position.distanceTo(goalCam) < 0.05) moving = false;
-  });
+  camera.position.set(s0.x, 6, s0.z + 12); controls.target.copy(s0);
+  ctx.onFrame(() => { if (!moving) return; camera.position.lerp(goalCam, 0.05); controls.target.lerp(goalTgt, 0.05); if (camera.position.distanceTo(goalCam) < 0.05) moving = false; });
   controls.addEventListener("start", () => (moving = false));
-  const fly = (cam, tgt) => { goalCam = cam; goalTgt = tgt; moving = true; };
+  const fly = (c, t) => { goalCam = c; goalTgt = t; moving = true; };
 
-  picking(ctx, pick, (it) => it.tip, onClick);
+  // التفاعل: تلميح + نقرة (مع تمييز السحب عن النقر)
+  const ray = new THREE.Raycaster(), mouse = new THREE.Vector2(), el = renderer.domElement, tip = document.getElementById("tip");
+  let hov = null, downAt = null;
+  const pick = (e) => { const r = el.getBoundingClientRect(); mouse.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1); ray.setFromCamera(mouse, camera); return ray.intersectObjects(hits, false)[0]?.object || null; };
+  el.addEventListener("pointermove", (e) => {
+    const o = pick(e), pinObj = o ? pins.find((x) => x.it === o.userData) : null;
+    if (hov && hov !== pinObj) hov.root.userData.hover = 0;
+    hov = pinObj;
+    if (pinObj) { pinObj.root.userData.hover = 1; el.style.cursor = "pointer"; tip.innerHTML = pinObj.it.tip || pinObj.it.label; tip.style.left = e.clientX + 14 + "px"; tip.style.top = e.clientY + 14 + "px"; tip.classList.remove("hidden"); }
+    else { el.style.cursor = ""; tip.classList.add("hidden"); }
+  });
+  el.addEventListener("pointerleave", () => { tip.classList.add("hidden"); if (hov) hov.root.userData.hover = 0; hov = null; });
+  el.addEventListener("pointerdown", (e) => (downAt = [e.clientX, e.clientY]));
+  el.addEventListener("pointerup", (e) => {
+    if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 6) return;
+    const o = pick(e); if (!o) return;
+    const pp = pins.find((x) => x.it === o.userData);
+    if (pp) { const w = pp.root.position; fly(new THREE.Vector3(w.x + 9, w.y + 12, w.z + 18), new THREE.Vector3(w.x, w.y + 4, w.z)); }
+    onClick && onClick(o.userData);
+  });
+
   return {
-    dispose: ctx.dispose,
-    focusToday: () => fly(new THREE.Vector3(tx - 10, 12, zFront + 16), new THREE.Vector3(tx + 4, 2, 0)),
+    dispose: () => { tip.classList.add("hidden"); ctx.dispose(); },
+    focusToday: () => { const { p } = frame(uT); fly(new THREE.Vector3(p.x + 10, 16, p.z + 26), new THREE.Vector3(p.x, 3, p.z - 4)); },
     overview: () => fly(ovCam(), ovTgt()),
-    top: () => fly(new THREE.Vector3(0, Math.min(LEN * 0.75, controls.maxDistance * 0.95), 2), new THREE.Vector3(0, 0, 0)),
+    top: () => fly(new THREE.Vector3(mid.x, Math.min(ext * 0.95 + 10, controls.maxDistance * 0.95), mid.z + 1), mid.clone()),
     toggleLabels: () => { const v = !labels[0]?.visible; labels.forEach((l) => (l.visible = v)); return v; },
   };
 }
