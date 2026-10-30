@@ -3,7 +3,7 @@
 //  يُفعَّل تلقائياً ما دام js/config.js لم يُعبَّأ، أو بإضافة ?demo للرابط
 // =====================================================================
 const KEY = "sanabel-demo-db";
-const VERSION = 2;
+const VERSION = 3;
 const uid = () => crypto.randomUUID();
 const now = () => new Date().toISOString();
 const day = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
@@ -33,12 +33,21 @@ function seed() {
     T({ title: "تصوير فيديو العرض", type: "other", status: "todo", priority: "low", assignee: M1, start_date: day(40), due_date: day(55), goal_id: G3 }),
     T({ project_id: P2, title: "تحليل أسئلة السنوات السابقة", type: "research", status: "doing", progress: 40, assignee: M3, start_date: day(-5), due_date: day(10) }),
   ];
-  const F = (path, language, content, by) => ({ id: uid(), project_id: P1, path, language, content, updated_by: by, created_at: now(), updated_at: now() });
+  let fi = 0;
+  const F = (path, language, content, by) => { const t = new Date(Date.now() - (fi++ * 5 + 1) * 3600e3).toISOString();
+    return { id: uid(), project_id: P1, path, language, content, size: new TextEncoder().encode(content).length, storage_path: null, updated_by: by, created_at: t, updated_at: t }; };
   const files = [
     F("src/main.py", "python", `# الملف الرئيسي للروبوت\nfrom sensors import read_distance\nfrom motors import drive\n\nSAFE_DISTANCE = 25  # cm\n\ndef loop():\n    d = read_distance()\n    if d < SAFE_DISTANCE:\n        drive(left=-0.4, right=0.4)   # دوران\n    else:\n        drive(left=0.6, right=0.6)    # تقدم\n\nwhile True:\n    loop()\n`, M3),
     F("src/sensors.py", "python", `import random\n\ndef read_distance():\n    """قراءة حساس الأمواج فوق الصوتية (محاكاة)"""\n    return random.uniform(5, 120)\n`, M1),
     F("firmware/motor_pid.ino", "cpp", `// متحكم PID للمحركات\nfloat Kp = 1.2, Ki = 0.05, Kd = 0.3;\nfloat integral = 0, prevErr = 0;\n\nfloat pid(float target, float measured, float dt) {\n  float e = target - measured;\n  integral += e * dt;\n  float d = (e - prevErr) / dt;\n  prevErr = e;\n  return Kp * e + Ki * integral + Kd * d;\n}\n\nvoid setup() { Serial.begin(115200); }\nvoid loop() {}\n`, M1),
     F("README.md", "markdown", "# روبوت الإنقاذ الذكي\n\nمشروع الفريق لمسابقة العلوم.\n", A),
+    F("src/utils/filters.py", "python", "def median(values):\n    s = sorted(values)\n    return s[len(s) // 2]\n", M3),
+    F("src/utils/__init__.py", "python", "", M3),
+    F("src/config.json", "json", '{\n  "safe_distance": 25,\n  "max_speed": 0.6\n}\n', M1),
+    F("firmware/lib/encoder.h", "cpp", "#pragma once\nlong readTicks();\n", M1),
+    F("docs/design-notes.md", "markdown", "# ملاحظات التصميم\n\n- الهيكل من الألمنيوم\n- 4 عجلات\n", M2),
+    F("docs/images/.keep", "plaintext", "", M2),
+    F("hardware/bom.csv", "plaintext", "part,qty\nArduino Mega,1\nHC-SR04,4\n", M2),
   ];
   return {
     _auth: { [`admin`]: { pw: "admin", id: A }, ahmad: { pw: "1234", id: M1 }, sara: { pw: "1234", id: M2 }, omar: { pw: "1234", id: M3 } },
@@ -127,6 +136,8 @@ class Query {
   delete() { this.op = "delete"; return this; }
   upsert(v, { onConflict = "id" } = {}) { this.op = "upsert"; this.v = Array.isArray(v) ? v : [v]; this.keys = onConflict.split(","); return this; }
   eq(k, v) { this.f.push((r) => r[k] === v); return this; }
+  in(k, arr) { this.f.push((r) => arr.includes(r[k])); return this; }
+  range(a, b) { this.rg = [a, b]; return this; }
   order(k, { ascending = true } = {}) { this.o = [k, ascending]; return this; }
   limit(n) { this.n = n; return this; }
   single() { this.one = "single"; return this; }
@@ -149,6 +160,7 @@ class Query {
       out = T.filter(match);
       if (this.o) { const [k, asc] = this.o; out = [...out].sort((a, b) => String(a[k] ?? "").localeCompare(String(b[k] ?? "")) * (asc ? 1 : -1)); }
       if (this.n) out = out.slice(0, this.n);
+      if (this.rg) out = out.slice(this.rg[0], this.rg[1] + 1);
     }
     if (this.op !== "select") persist();
     out = JSON.parse(JSON.stringify(out));
@@ -203,7 +215,7 @@ export function createDemoClient() {
         }
       },
     },
-    channel: () => { const ch = { on: () => ch, subscribe: () => ch }; return ch; },
+    channel: () => { const ch = { on: () => ch, subscribe: (cb) => { setTimeout(() => cb && cb("SUBSCRIBED"), 0); return ch; }, track: async () => {}, presenceState: () => ({}) }; return ch; },
     removeChannel: () => {},
   };
 }

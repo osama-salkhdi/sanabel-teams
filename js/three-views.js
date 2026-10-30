@@ -5,27 +5,30 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 
 const GREEN = 0x1e4a38, GREEN2 = 0x2a6049, GOLD = 0xc39a5c, CREAM = 0xf5ece5;
 export const STATUS_COLORS = { todo: 0x9bb3a6, doing: GOLD, review: 0x3c6e9c, done: 0x3f8f63, goal: 0xf5ece5 };
 
-function base(container, { camPos = [0, 8, 18], controls = true, bg = null, bloom = false } = {}) {
+function base(container, { camPos = [0, 8, 18], controls = true, bg = null, bloom = false, lights = true } = {}) {
   const w = container.clientWidth, h = container.clientHeight;
   const scene = new THREE.Scene();
   if (bg !== null) scene.background = new THREE.Color(bg);
-  const camera = new THREE.PerspectiveCamera(45, w / h, 0.1, 1000);
+  const camera = new THREE.PerspectiveCamera(45, w / h, 0.5, 1200);
   camera.position.set(...camPos);
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: !bloom });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.setSize(w, h);
   renderer.shadowMap.enabled = true;
   container.appendChild(renderer.domElement);
-  scene.add(new THREE.AmbientLight(0xffffff, 0.65));
-  const sun = new THREE.DirectionalLight(0xfff1dc, 1.2);
-  sun.position.set(8, 16, 10); sun.castShadow = true;
-  sun.shadow.mapSize.set(1024, 1024);
-  Object.assign(sun.shadow.camera, { left: -30, right: 30, top: 30, bottom: -30 });
-  scene.add(sun);
+  if (lights) {
+    scene.add(new THREE.AmbientLight(0xffffff, 0.65));
+    const sun = new THREE.DirectionalLight(0xfff1dc, 1.2);
+    sun.position.set(8, 16, 10); sun.castShadow = true;
+    sun.shadow.mapSize.set(1024, 1024);
+    Object.assign(sun.shadow.camera, { left: -30, right: 30, top: 30, bottom: -30 });
+    scene.add(sun);
+  }
   let ctl = null;
   if (controls) {
     ctl = new OrbitControls(camera, renderer.domElement);
@@ -137,37 +140,288 @@ export function loginBackground(canvas) {
   return ctx.dispose;
 }
 
-// ---------- لوحة المدير: أعمدة المشاريع على شكل قوس الشعار ----------
-export function projectsScene(container, projects, onClick) {
-  const ctx = base(container, { camPos: [0, 9, 20] });
-  const floor = new THREE.Mesh(new THREE.CircleGeometry(16, 64), new THREE.MeshStandardMaterial({ color: 0x16372a, roughness: 0.9 }));
-  floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; ctx.scene.add(floor);
-  for (let i = 1; i <= 4; i++) {
-    const ring = new THREE.Mesh(new THREE.RingGeometry(i * 3.6, i * 3.6 + 0.05, 96), new THREE.MeshBasicMaterial({ color: GOLD, transparent: true, opacity: 0.25, side: THREE.DoubleSide }));
-    ring.rotation.x = -Math.PI / 2; ring.position.y = 0.01; ctx.scene.add(ring);
+// ---------- لوحة المدير: حقل قمح وأشجار زيتون — كل شجرة مشروع ----------
+// project: {id,name,progress,done,total,overdue,color}
+function cardSprite(title, pct, accent = "#c39a5c") {
+  const c = document.createElement("canvas"), g = c.getContext("2d");
+  const W = 560, Hc = 170; c.width = W; c.height = Hc;
+  g.fillStyle = "rgba(20,48,36,.92)"; g.beginPath(); g.roundRect(6, 6, W - 12, Hc - 34, 30); g.fill();
+  g.strokeStyle = accent; g.lineWidth = 5; g.stroke();
+  g.beginPath(); g.moveTo(W / 2 - 22, Hc - 30); g.lineTo(W / 2 + 22, Hc - 30); g.lineTo(W / 2, Hc - 6); g.closePath(); g.fillStyle = "rgba(20,48,36,.92)"; g.fill();
+  g.direction = "rtl"; g.textAlign = "center"; g.fillStyle = "#fff"; g.font = "800 46px Tajawal, sans-serif";
+  const t = title.length > 22 ? title.slice(0, 21) + "…" : title;
+  g.fillText("🫒 " + t, W / 2, 62);
+  const bx = 50, by = 88, bw = W - 170, bh = 22;
+  g.fillStyle = "rgba(255,255,255,.18)"; g.beginPath(); g.roundRect(bx, by, bw, bh, 11); g.fill();
+  const grd = g.createLinearGradient(bx, 0, bx + bw, 0); grd.addColorStop(0, "#d8b57f"); grd.addColorStop(1, accent);
+  g.fillStyle = grd; g.beginPath(); g.roundRect(bx + bw * (1 - pct / 100), by, Math.max(bw * pct / 100, 12), bh, 11); g.fill();
+  g.fillStyle = "#f4e8d6"; g.font = "800 38px Tajawal, sans-serif"; g.textAlign = "left"; g.direction = "ltr";
+  g.fillText(pct + "%", bx + bw + 16, by + 20);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
+  s.scale.set(4.6, 4.6 * Hc / W, 1); s.renderOrder = 10;
+  return s;
+}
+function rng(seed) { let s = seed % 2147483647; if (s <= 0) s += 2147483646; return () => (s = (s * 16807) % 2147483647) / 2147483647; }
+const hashStr = (str) => [...String(str)].reduce((a, ch) => (a * 31 + ch.charCodeAt(0)) | 0, 7) >>> 0;
+
+export function farmScene(container, projects, { onSelect, onHover } = {}) {
+  const ctx = base(container, { camPos: [0, 15, 40], lights: false });
+  const { scene, camera, renderer, controls } = ctx;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.08;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  const U = { uTime: { value: 0 } };
+  ctx.onFrame((t) => (U.uTime.value = t));
+
+  // سماء متدرجة دافئة
+  { const c = document.createElement("canvas"); c.width = 4; c.height = 256; const g = c.getContext("2d");
+    const gr = g.createLinearGradient(0, 0, 0, 256);
+    gr.addColorStop(0, "#7fb2d6"); gr.addColorStop(0.45, "#cfe0e3"); gr.addColorStop(0.75, "#f6e3bd"); gr.addColorStop(1, "#f2cf96");
+    g.fillStyle = gr; g.fillRect(0, 0, 4, 256);
+    const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace; scene.background = tx; }
+  scene.fog = new THREE.Fog(0xf0dcb4, 85, 190);
+  scene.add(new THREE.HemisphereLight(0xfff3d6, 0x4d5a2a, 0.85));
+  const sun = new THREE.DirectionalLight(0xffdca8, 2.1);
+  sun.position.set(-34, 46, 26); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.0004;
+  Object.assign(sun.shadow.camera, { left: -55, right: 55, top: 45, bottom: -45, near: 1, far: 160 });
+  scene.add(sun);
+
+  // تضاريس: حقل مستوٍ تقريباً + تلال بعيدة
+  const FX = 42, FZ = 27; // نصف أبعاد الحقل
+  const Hf = (x, z) => {
+    let h = 0.35 * Math.sin(x * 0.09) * Math.cos(z * 0.08) + 0.18 * Math.sin(x * 0.23 + z * 0.17);
+    const d = Math.max(Math.abs(x) / (FX + 6), Math.abs(z) / (FZ + 6));
+    if (d > 1) h += Math.pow((d - 1) * 9, 1.6) * (0.9 + 0.5 * Math.sin(x * 0.07 + z * 0.05));
+    return h;
+  };
+  { const geo = new THREE.PlaneGeometry(240, 200, 180, 150); geo.rotateX(-Math.PI / 2);
+    const p = geo.attributes.position, cols = new Float32Array(p.count * 3), c = new THREE.Color();
+    const soil = new THREE.Color(0xb8925a), grass = new THREE.Color(0x7e9442), hill = new THREE.Color(0x6f8a45), far = new THREE.Color(0xa8b07a);
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i), z = p.getZ(i), h = Hf(x, z); p.setY(i, h);
+      const inField = Math.abs(x) < FX + 2 && Math.abs(z) < FZ + 2;
+      const n = 0.5 + 0.5 * Math.sin(x * 0.5) * Math.cos(z * 0.43);
+      if (inField) c.copy(soil).lerp(grass, 0.18 + n * 0.25); else c.copy(grass).lerp(hill, Math.min(1, h / 6)).lerp(far, Math.min(1, Math.max(0, (Math.hypot(x, z) - 70) / 50)));
+      c.toArray(cols, i * 3);
+    }
+    geo.setAttribute("color", new THREE.BufferAttribute(cols, 3)); geo.computeVertexNormals();
+    const ground = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 }));
+    ground.receiveShadow = true; scene.add(ground); }
+
+  // مواقع الأشجار (صفوف متناوبة)
+  const n = projects.length, spots = [];
+  if (n) {
+    const cols = Math.min(n, Math.max(1, Math.ceil(Math.sqrt(n * 2.2)))), rows = Math.ceil(n / cols);
+    const sx = Math.min(22, (FX * 2 - 14) / Math.max(cols - 1, 1)), sz = Math.min(18, (FZ * 2 - 14) / Math.max(rows - 1, 1));
+    for (let i = 0; i < n; i++) {
+      const r = Math.floor(i / cols), cIn = i % cols, inRow = Math.min(cols, n - r * cols);
+      const x = (cIn - (inRow - 1) / 2) * sx + (r % 2 ? sx * 0.25 : 0), z = (r - (rows - 1) / 2) * sz;
+      spots.push([x, z]);
+    }
   }
-  const pickables = [];
-  const n = Math.max(projects.length, 1);
+  const clear = (x, z) => spots.some(([a, b]) => Math.hypot(x - a, z - b) < 6.4) || Math.abs(z - FZ + 1) < 1.6 || Math.abs(x) < 1.3;
+
+  // سنابل القمح (Instanced + ريح بالـ shader)
+  { const stalk = new THREE.CylinderGeometry(0.025, 0.04, 1.35, 3); stalk.translate(0, 0.675, 0);
+    const ear = new THREE.CylinderGeometry(0.075, 0.03, 0.42, 5); ear.translate(0, 1.55, 0);
+    const awn = new THREE.ConeGeometry(0.05, 0.3, 3); awn.translate(0, 1.88, 0);
+    const geo = mergeGeometries([stalk.toNonIndexed(), ear.toNonIndexed(), awn.toNonIndexed()]);
+    const mat = new THREE.MeshStandardMaterial({ roughness: 0.85, color: 0xffffff });
+    mat.onBeforeCompile = (sh) => {
+      sh.uniforms.uTime = U.uTime;
+      sh.vertexShader = "uniform float uTime;\n" + sh.vertexShader.replace("#include <begin_vertex>", `#include <begin_vertex>
+        vec3 ip = vec3(0.0);
+        #ifdef USE_INSTANCING
+          ip = vec3(instanceMatrix[3][0], instanceMatrix[3][1], instanceMatrix[3][2]);
+        #endif
+        float bend = smoothstep(0.0, 2.0, position.y); bend *= bend;
+        float gust = sin(uTime * 0.6 + ip.x * 0.06) * 0.5 + 0.5;
+        float w = sin(uTime * 1.7 + ip.x * 0.32 + ip.z * 0.21) * (0.12 + 0.16 * gust) + sin(uTime * 3.3 + ip.x * 1.7 + ip.z) * 0.035;
+        transformed.x += w * bend; transformed.z += w * 0.45 * bend;`);
+    };
+    const N = 9000, inst = new THREE.InstancedMesh(geo, mat, N), m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), col = new THREE.Color();
+    const tones = [0xe2bf62, 0xd6ad4b, 0xeacb7a, 0xc99a3c, 0xdab55a];
+    const R = rng(42); let k = 0, tries = 0;
+    while (k < N && tries < N * 4) {
+      tries++;
+      const x = (R() * 2 - 1) * FX, z = (R() * 2 - 1) * FZ;
+      if (clear(x, z)) continue;
+      const s = 0.75 + R() * 0.5; sc.set(s, s * (0.85 + R() * 0.35), s);
+      q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), 0);
+      m.compose(new THREE.Vector3(x, Hf(x, z) - 0.05, z), q, sc); inst.setMatrixAt(k, m);
+      col.setHex(tones[Math.floor(R() * tones.length)]).offsetHSL(0, 0, (R() - 0.5) * 0.08); inst.setColorAt(k, col);
+      k++;
+    }
+    inst.count = k; inst.receiveShadow = true; scene.add(inst); }
+
+  // سياج خشبي حول الحقل
+  { const postG = new THREE.BoxGeometry(0.25, 1.4, 0.25), railG = new THREE.BoxGeometry(1, 0.12, 0.1);
+    const wood = new THREE.MeshStandardMaterial({ color: 0x8a6a45, roughness: 0.95 });
+    const posts = [], rails = [];
+    const edge = (x1, z1, x2, z2) => { const L = Math.hypot(x2 - x1, z2 - z1), steps = Math.round(L / 3.2);
+      for (let i = 0; i <= steps; i++) { const t = i / steps, x = x1 + (x2 - x1) * t, z = z1 + (z2 - z1) * t; posts.push([x, z]);
+        if (i < steps) { const t2 = (i + 0.5) / steps; rails.push([x1 + (x2 - x1) * t2, z1 + (z2 - z1) * t2, Math.atan2(z2 - z1, x2 - x1), L / steps]); } } };
+    const ex = FX + 2.5, ez = FZ + 2.5;
+    edge(-ex, -ez, ex, -ez); edge(ex, -ez, ex, ez); edge(-ex, -ez, -ex, ez); edge(-ex, ez, -2.2, ez); edge(2.2, ez, ex, ez);
+    const P = new THREE.InstancedMesh(postG, wood, posts.length), Rm = new THREE.InstancedMesh(railG, wood, rails.length * 2), m = new THREE.Matrix4();
+    posts.forEach(([x, z], i) => { m.makeTranslation(x, Hf(x, z) + 0.6, z); P.setMatrixAt(i, m); });
+    rails.forEach(([x, z, a, L], i) => { for (const [j, y] of [[0, 0.55], [1, 1.05]]) {
+      m.compose(new THREE.Vector3(x, Hf(x, z) + y, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -a), new THREE.Vector3(L, 1, 1)); Rm.setMatrixAt(i * 2 + j, m); } });
+    P.castShadow = Rm.castShadow = true; scene.add(P, Rm); }
+
+  // ممر ترابي في المنتصف
+  { const path = new THREE.Mesh(new THREE.PlaneGeometry(2.4, FZ * 2 + 6), new THREE.MeshStandardMaterial({ color: 0xc9a46e, roughness: 1 }));
+    path.rotation.x = -Math.PI / 2; path.position.set(0, 0.42, 1); path.receiveShadow = true; scene.add(path); }
+
+  // قناطر حجرية في الخلفية (من شعار الأكاديمية)
+  { const shape = new THREE.Shape(); const L = 70, H = 9;
+    shape.moveTo(-L / 2, 0); shape.lineTo(L / 2, 0); shape.lineTo(L / 2, H); shape.lineTo(-L / 2, H); shape.lineTo(-L / 2, 0);
+    const n2 = 11, w = L / n2;
+    for (let i = 0; i < n2; i++) { const cx = -L / 2 + w * (i + 0.5), hole = new THREE.Path(), r = w * 0.32;
+      hole.moveTo(cx - r, 0.01); hole.lineTo(cx - r, H * 0.5); hole.absarc(cx, H * 0.5, r, Math.PI, 0, true); hole.lineTo(cx + r, 0.01); hole.lineTo(cx - r, 0.01); shape.holes.push(hole); }
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: 2.2, bevelEnabled: true, bevelSize: 0.15, bevelThickness: 0.15, bevelSegments: 1 });
+    const aq = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0xdcc7a1, roughness: 0.9 }));
+    aq.position.set(0, Hf(0, -FZ - 22) - 0.5, -FZ - 22); aq.castShadow = aq.receiveShadow = true; scene.add(aq); }
+
+  // أشجار سرو بعيدة
+  { const g = new THREE.ConeGeometry(1, 1, 7), mat = new THREE.MeshStandardMaterial({ color: 0x3e5a2e, roughness: 1, flatShading: true });
+    const R = rng(7), list = [];
+    for (let i = 0; i < 70; i++) { const a = R() * Math.PI * 2, r = 58 + R() * 40, x = Math.cos(a) * r * 1.2, z = Math.sin(a) * r * 0.85;
+      if (z > 10 && Math.abs(x) < 50) continue; list.push([x, z, 1.2 + R() * 0.8, 6 + R() * 6]); }
+    const inst = new THREE.InstancedMesh(g, mat, list.length), m = new THREE.Matrix4();
+    list.forEach(([x, z, r, h], i) => { m.compose(new THREE.Vector3(x, Hf(x, z) + h / 2 - 0.3, z), new THREE.Quaternion(), new THREE.Vector3(r, h, r)); inst.setMatrixAt(i, m); });
+    inst.castShadow = true; scene.add(inst); }
+
+  // غيوم تنساب
+  { const cm = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, flatShading: true, transparent: true, opacity: 0.92 });
+    const R = rng(3);
+    for (let i = 0; i < 7; i++) { const cl = new THREE.Group();
+      for (let j = 0; j < 5; j++) { const b = new THREE.Mesh(new THREE.IcosahedronGeometry(2 + R() * 2.2, 1), cm); b.position.set((j - 2) * 2.4, R() * 1.2, R() * 2); b.scale.y = 0.65; cl.add(b); }
+      const z = -70 + R() * 60, y = 30 + R() * 14, sp = 0.6 + R() * 0.8, x0 = -120 + R() * 240;
+      cl.position.set(x0, y, z); scene.add(cl);
+      ctx.onFrame((t) => { cl.position.x = ((x0 + t * sp + 130) % 260) - 130; }); } }
+
+  // ذرّات لقاح ذهبية
+  { const N = 260, pos = new Float32Array(N * 3), R = rng(11);
+    for (let i = 0; i < N; i++) pos.set([(R() * 2 - 1) * FX, 1 + R() * 7, (R() * 2 - 1) * FZ], i * 3);
+    const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    const pts = new THREE.Points(g, new THREE.PointsMaterial({ color: 0xffe6a0, size: 0.16, transparent: true, opacity: 0.8, depthWrite: false }));
+    scene.add(pts); ctx.onFrame((t) => { pts.position.y = Math.sin(t * 0.4) * 0.6; pts.rotation.y = Math.sin(t * 0.05) * 0.04; }); }
+
+  // ---- أشجار الزيتون ----
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x7c6a54, roughness: 1, flatShading: true });
+  const leafTones = [0x7a8a48, 0x6a7b3c, 0x8d9d5e, 0x95a56e, 0x5f7036];
+  const trees = [], hits = [];
   projects.forEach((p, i) => {
-    const a = Math.PI - (Math.PI * (i + 0.5)) / n; // قوس نصف دائري
-    const R = 9, x = Math.cos(a) * R, z = -Math.sin(a) * R + 3;
-    const H = 0.6 + (p.progress / 100) * 8;
-    const ghost = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, 8.6, 32), new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.07 }));
-    ghost.position.set(x, 4.3, z); ctx.scene.add(ghost);
-    const col = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, H, 32),
-      new THREE.MeshStandardMaterial({ color: new THREE.Color(p.color || "#c39a5c"), metalness: 0.35, roughness: 0.35, emissive: 0x111111 }));
-    col.position.set(x, H / 2, z); col.castShadow = true;
-    col.userData = p; pickables.push(col); ctx.scene.add(col);
-    const cap = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.4, 6), new THREE.MeshStandardMaterial({ color: GOLD, metalness: 0.6, roughness: 0.3 }));
-    cap.position.set(x, H + 0.7, z); ctx.scene.add(cap);
-    const lbl = textSprite(`${p.name} — ${p.progress}%`, { size: 0.75 });
-    lbl.position.set(x, H + 2.1, z); ctx.scene.add(lbl);
-    ctx.onFrame((t) => { cap.rotation.y = t * 1.2 + i; });
+    const [x, z] = spots[i], y0 = Hf(x, z), R = rng(hashStr(p.id || p.name) + 1);
+    const prog = Math.max(0, Math.min(100, p.progress || 0));
+    const growth = 1.0 + 0.75 * (prog / 100); // شجيرة صغيرة ← شجرة معمّرة
+    const tree = new THREE.Group(); tree.position.set(x, y0, z); scene.add(tree);
+    const body = new THREE.Group(); body.scale.setScalar(growth); tree.add(body);
+    // جذع ملتوٍ
+    const tg = new THREE.CylinderGeometry(0.32, 0.62, 3.2, 9, 8); tg.translate(0, 1.6, 0);
+    const tp = tg.attributes.position;
+    for (let v = 0; v < tp.count; v++) { const yy = tp.getY(v), a = yy * 0.9, xx = tp.getX(v), zz = tp.getZ(v);
+      tp.setXYZ(v, xx * Math.cos(a) - zz * Math.sin(a) + Math.sin(yy * 1.4) * 0.22, yy, xx * Math.sin(a) + zz * Math.cos(a) + Math.cos(yy * 1.1) * 0.15); }
+    tg.computeVertexNormals();
+    const trunk = new THREE.Mesh(tg, trunkMat); trunk.castShadow = true; body.add(trunk);
+    for (let b = 0; b < 3; b++) { const bg = new THREE.CylinderGeometry(0.12, 0.24, 2, 6); bg.translate(0, 1, 0);
+      const br = new THREE.Mesh(bg, trunkMat); br.position.set(0, 2.8, 0); br.rotation.set(0.55 + R() * 0.3, b * 2.1 + R(), 0, "YXZ"); br.castShadow = true; body.add(br); }
+    // تاج متعدد الكتل
+    const canopy = new THREE.Group(); canopy.position.y = 4.1; body.add(canopy);
+    const leafMats = [];
+    const blobs = 9 + Math.floor(R() * 4);
+    for (let b = 0; b < blobs; b++) {
+      const r = 1.05 + R() * 0.8, g = new THREE.IcosahedronGeometry(r, 1), gp = g.attributes.position;
+      for (let v = 0; v < gp.count; v++) gp.setXYZ(v, gp.getX(v) * (0.9 + R() * 0.2), gp.getY(v) * (0.75 + R() * 0.15), gp.getZ(v) * (0.9 + R() * 0.2));
+      g.computeVertexNormals();
+      const mat = new THREE.MeshStandardMaterial({ color: leafTones[Math.floor(R() * leafTones.length)], roughness: 0.9, flatShading: true, emissive: 0x000000 });
+      leafMats.push(mat);
+      const m = new THREE.Mesh(g, mat); const a = (b / blobs) * Math.PI * 2 + R() * 0.5, rr = b === 0 ? 0 : 1.2 + R() * 1.1;
+      m.position.set(Math.cos(a) * rr, (R() - 0.3) * 1.3 + (b === 0 ? 0.6 : 0), Math.sin(a) * rr); m.castShadow = true; canopy.add(m);
+    }
+    // ثمار الزيتون = المهام المنجزة
+    const olives = Math.min(60, Math.round((p.done || 0) * 3 + prog * 0.25));
+    if (olives) { const og = new THREE.SphereGeometry(0.13, 8, 6); og.scale(1, 1.3, 1);
+      const ripe = new THREE.MeshStandardMaterial({ color: 0x3b2440, roughness: 0.35, metalness: 0.1 }), green = new THREE.MeshStandardMaterial({ color: 0x8a9a2c, roughness: 0.4 });
+      for (let o = 0; o < olives; o++) { const a = R() * Math.PI * 2, e = (R() - 0.35) * 1.2, rr = 2.1 + R() * 0.5;
+        const ol = new THREE.Mesh(og, R() < prog / 100 ? ripe : green); ol.position.set(Math.cos(a) * rr * Math.cos(e), Math.sin(e) * 1.6 + 0.3, Math.sin(a) * rr * Math.cos(e)); canopy.add(ol); } }
+    // حلقة الحالة
+    const ringColor = prog >= 100 ? 0x2fbf71 : p.overdue ? 0xff4d4f : 0xe8c27a;
+    const ring = new THREE.Mesh(new THREE.RingGeometry(4.2, 4.8, 64), new THREE.MeshBasicMaterial({ color: ringColor, transparent: true, opacity: 0.75, side: THREE.DoubleSide, depthWrite: false }));
+    ring.rotation.x = -Math.PI / 2; ring.position.y = 0.08; tree.add(ring);
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(5.9, 48), new THREE.MeshStandardMaterial({ color: 0x9a7448, roughness: 1 }));
+    disc.rotation.x = -Math.PI / 2; disc.position.y = 0.03; disc.receiveShadow = true; tree.add(disc);
+    if (prog >= 100) { const star = new THREE.Mesh(new THREE.OctahedronGeometry(0.45), new THREE.MeshStandardMaterial({ color: 0xffd36b, emissive: 0xc08a20, emissiveIntensity: 1.2 }));
+      star.scale.setScalar(1.6); star.position.y = 9.4 * growth; tree.add(star); ctx.onFrame((t) => { star.rotation.y = t * 1.8; star.position.y = 9.4 * growth + Math.sin(t * 2) * 0.25; }); }
+    if (p.overdue) { const flag = new THREE.Group(); const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 2.4, 6), trunkMat); pole.position.y = 1.2;
+      const cloth = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.55), new THREE.MeshStandardMaterial({ color: 0xe5484d, side: THREE.DoubleSide, emissive: 0x551010 }));
+      cloth.position.set(0.47, 2.1, 0); flag.add(pole, cloth); flag.position.set(3.4, 0, 2.6); flag.scale.setScalar(1.5); tree.add(flag);
+      ctx.onFrame((t) => (cloth.rotation.y = Math.sin(t * 3 + i) * 0.35)); }
+    const label = cardSprite(p.name, prog, prog >= 100 ? "#2fbf71" : p.overdue ? "#ff6b6b" : "#e8c27a");
+    label.position.y = 7.6 * growth + 2.2; label.scale.multiplyScalar(1.5); tree.add(label);
+    // هدف النقر (غير مرئي)
+    const hit = new THREE.Mesh(new THREE.CylinderGeometry(4.6, 4.6, 8.5 * growth + 3, 12), new THREE.MeshBasicMaterial({ visible: false }));
+    hit.position.y = (8.5 * growth + 3) / 2; hit.userData = p; tree.add(hit); hits.push(hit);
+    const ph = R() * 6;
+    ctx.onFrame((t) => {
+      canopy.rotation.z = Math.sin(t * 0.9 + ph) * 0.025; canopy.rotation.x = Math.cos(t * 0.7 + ph) * 0.02;
+      ring.material.opacity = 0.45 + 0.35 * (0.5 + 0.5 * Math.sin(t * (p.overdue ? 4 : 2) + ph));
+      const target = tree.userData.hover || tree.userData.selected ? 1.18 : 1; const s = ring.scale.x + (target - ring.scale.x) * 0.12; ring.scale.set(s, s, s);
+      const e = tree.userData.hover || tree.userData.selected ? 0.16 : 0; leafMats.forEach((m) => m.emissive.setRGB(e * 0.9, e * 0.75, e * 0.2));
+    });
+    trees.push({ p, tree, x, z, y0, growth });
   });
-  if (!projects.length) { const s = textSprite("لا توجد مشاريع بعد", { size: 1 }); s.position.y = 2; ctx.scene.add(s); }
-  ctx.controls.autoRotate = true; ctx.controls.autoRotateSpeed = 0.6;
-  picking(ctx, pickables, (p) => `<b>${p.name}</b><br>الإنجاز: ${p.progress}%<br>المهام: ${p.done}/${p.total}`, onClick);
-  return ctx.dispose;
+  if (!n) { const s = textSprite("🌱 لا توجد مشاريع بعد — ازرع أول شجرة من «＋ مشروع جديد»", { size: 1.6 }); s.position.set(0, 4, 0); scene.add(s); }
+
+  // ---- الكاميرا: حدود ثابتة تمنع ضياع المشهد ----
+  controls.enableDamping = true; controls.dampingFactor = 0.08;
+  controls.minDistance = 14; controls.maxDistance = 80;
+  controls.minPolarAngle = 0.3; controls.maxPolarAngle = 1.42;
+  controls.screenSpacePanning = false; controls.panSpeed = 0.7; controls.zoomSpeed = 0.8;
+  controls.target.set(0, 5, -4);
+  const clampT = () => { const t = controls.target; t.x = Math.max(-FX, Math.min(FX, t.x)); t.z = Math.max(-FZ, Math.min(FZ, t.z)); t.y = Math.max(1, Math.min(9, t.y)); };
+  controls.addEventListener("change", clampT);
+  controls.autoRotate = true; controls.autoRotateSpeed = 0.35;
+  let idle; controls.addEventListener("start", () => { controls.autoRotate = false; clearTimeout(idle); });
+  controls.addEventListener("end", () => { clearTimeout(idle); idle = setTimeout(() => { if (!selected) controls.autoRotate = true; }, 20000); });
+  const home = { cam: new THREE.Vector3(0, 15, 40), tgt: new THREE.Vector3(0, 5, -4) };
+  let fly = null;
+  ctx.onFrame(() => { if (!fly) return; camera.position.lerp(fly.cam, 0.06); controls.target.lerp(fly.tgt, 0.06); if (camera.position.distanceTo(fly.cam) < 0.08) fly = null; });
+  const flyTo = (cam, tgt) => { fly = { cam, tgt }; controls.autoRotate = false; };
+
+  // ---- التفاعل ----
+  const ray = new THREE.Raycaster(), mouse = new THREE.Vector2(), el = renderer.domElement, tip = document.getElementById("tip");
+  let hovered = null, selected = null, downAt = null;
+  const pick = (e) => { const r = el.getBoundingClientRect(); mouse.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    ray.setFromCamera(mouse, camera); const h = ray.intersectObjects(hits, false)[0]; return h ? trees.find((t) => t.p === h.object.userData) : null; };
+  el.addEventListener("pointermove", (e) => {
+    const t = pick(e);
+    if (hovered && hovered !== t) hovered.tree.userData.hover = false;
+    hovered = t;
+    if (t) { t.tree.userData.hover = true; el.style.cursor = "pointer";
+      tip.innerHTML = onHover ? onHover(t.p) : t.p.name; tip.style.left = e.clientX + 14 + "px"; tip.style.top = e.clientY + 14 + "px"; tip.classList.remove("hidden"); }
+    else { el.style.cursor = ""; tip.classList.add("hidden"); }
+  });
+  el.addEventListener("pointerleave", () => { tip.classList.add("hidden"); if (hovered) hovered.tree.userData.hover = false; hovered = null; });
+  el.addEventListener("pointerdown", (e) => (downAt = [e.clientX, e.clientY]));
+  el.addEventListener("pointerup", (e) => {
+    if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 6) return; // سحب وليس نقرة
+    const t = pick(e); select(t ? t.p.id : null, true);
+  });
+  function select(id, notify) {
+    if (selected) selected.tree.userData.selected = false;
+    selected = trees.find((t) => t.p.id === id) || null;
+    if (selected) { const { x, z, growth } = selected; selected.tree.userData.selected = true;
+      flyTo(new THREE.Vector3(x + 12, 7 + growth * 4, z + 20), new THREE.Vector3(x, 4 * growth, z)); }
+    if (notify && onSelect) onSelect(selected ? selected.p : null);
+  }
+  return {
+    dispose: () => { clearTimeout(idle); tip.classList.add("hidden"); ctx.dispose(); },
+    reset: () => { select(null, true); flyTo(home.cam.clone(), home.tgt.clone()); },
+    select: (id) => select(id, false),
+    tour: () => { select(null, true); fly = null; controls.autoRotate = !controls.autoRotate; return controls.autoRotate; },
+  };
 }
 
 // ---------- الخط الزمني ثلاثي الأبعاد (تصميم «النهر الزمني» المضيء) ----------
@@ -180,7 +434,7 @@ export function timelineScene(container, items, lanes, onClick, { goals = [] } =
   const ctx = base(container, { camPos: [-10, 26, 46], bloom: true });
   const { scene, camera, controls } = ctx;
   scene.background = new THREE.Color(BG);
-  scene.fog = new THREE.FogExp2(BG, 0.0105);
+  scene.fog = new THREE.Fog(BG, 140, 330);
   scene.add(new THREE.HemisphereLight(0x9fe6c7, 0x0b1a14, 0.6));
 
   const DAY = 86400000, today = new Date(new Date().toDateString());
@@ -320,7 +574,11 @@ export function timelineScene(container, items, lanes, onClick, { goals = [] } =
   if (!items.length && !goals.length) { const s = textSprite("لا توجد مهام بتواريخ بعد", { size: 1.4 }); s.position.y = 3; scene.add(s); }
 
   // كاميرا: حركة دخول سينمائية + تنقل سلس
-  controls.target.set(0, 1, 0); controls.maxDistance = LEN * 1.6; controls.minDistance = 6;
+  controls.target.set(0, 1, 0); controls.maxDistance = Math.min(LEN * 1.05 + nL * 4, 170); controls.minDistance = 8;
+  controls.minPolarAngle = 0.15; controls.screenSpacePanning = false; controls.zoomSpeed = 0.8;
+  scene.fog.near = controls.maxDistance * 1.1; scene.fog.far = controls.maxDistance * 2.6;
+  controls.addEventListener("change", () => { const t = controls.target;
+    t.x = Math.max(-LEN / 2 - 8, Math.min(LEN / 2 + 8, t.x)); t.z = Math.max(zBack - 8, Math.min(zFront + 8, t.z)); t.y = Math.max(0, Math.min(8, t.y)); });
   const ovCam = () => new THREE.Vector3(-LEN * 0.08, 13 + nL * 1.5, LEN * 0.3 + nL * 4.5), ovTgt = () => new THREE.Vector3(-LEN * 0.05, 1.5, -2);
   let goalCam = ovCam(), goalTgt = ovTgt(), moving = true;
   camera.position.set(-LEN * 0.6, 60, LEN * 1.1);
@@ -337,7 +595,7 @@ export function timelineScene(container, items, lanes, onClick, { goals = [] } =
     dispose: ctx.dispose,
     focusToday: () => fly(new THREE.Vector3(tx - 10, 12, zFront + 16), new THREE.Vector3(tx + 4, 2, 0)),
     overview: () => fly(ovCam(), ovTgt()),
-    top: () => fly(new THREE.Vector3(0, LEN * 0.75, 2), new THREE.Vector3(0, 0, 0)),
+    top: () => fly(new THREE.Vector3(0, Math.min(LEN * 0.75, controls.maxDistance * 0.95), 2), new THREE.Vector3(0, 0, 0)),
     toggleLabels: () => { const v = !labels[0]?.visible; labels.forEach((l) => (l.visible = v)); return v; },
   };
 }

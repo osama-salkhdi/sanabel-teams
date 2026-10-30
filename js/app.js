@@ -1,8 +1,9 @@
 // =====================================================================
 //  منصة الفرق المشاركة في المسابقات — أكاديمية سنابل التقنية
 // =====================================================================
-import { loginBackground, projectsScene, timelineScene } from "./three-views.js";
+import { loginBackground, farmScene, timelineScene } from "./three-views.js";
 import { createDemoClient, resetDemo } from "./demo.js";
+import { createFilesView } from "./files-view.js";
 
 const C = window.CONFIG;
 const DEMO = C.SUPABASE_URL.includes("YOUR-") || new URLSearchParams(location.search).has("demo");
@@ -337,7 +338,21 @@ VIEWS.dashboard = async (main) => {
       <div class="kpi"><b>${avg(stats.map((s) => s.progress))}%</b><span>متوسط الإنجاز</span></div>
       <div class="kpi"><b style="color:var(--red)">${tasks.filter(isOverdue).length}</b><span>مهام متأخرة</span></div>
     </div>
-    <div class="three-d" id="proj3d"><div class="legend">🖱️ اسحب للتدوير · عجلة الفأرة للتكبير · انقر على عمود لفتح المشروع</div></div>
+    <div class="farm-wrap" id="farm-wrap">
+      <div class="three-d farm" id="proj3d"></div>
+      <div class="farm-hud">
+        <button class="btn3d" id="farm-reset">🔄 إعادة الضبط</button>
+        <button class="btn3d" id="farm-tour">🎥 جولة تلقائية</button>
+        <button class="btn3d" id="farm-fs">⛶ ملء الشاشة</button>
+      </div>
+      <div class="farm-legend">
+        <b>🌳 كل شجرة زيتون = مشروع</b>
+        <span>📏 حجم الشجرة = نسبة الإنجاز</span><span>🫒 الثمار = المهام المنجزة</span>
+        <span><i style="background:#e8c27a"></i>جارٍ</span><span><i style="background:#2fbf71"></i>مكتمل ⭐</span><span><i style="background:#ff4d4f"></i>مهام متأخرة 🚩</span>
+        <small>🖱️ اسحب للتدوير · العجلة للتكبير (بحدود) · زر يمين للتحريك · انقر على شجرة</small>
+      </div>
+      <div class="farm-card hidden" id="farm-card"></div>
+    </div>
     <h3 style="margin:22px 0 10px;color:var(--green)">المشاريع</h3>
     <div class="cards">${stats.map((p) => `
       <div class="card">
@@ -354,7 +369,32 @@ VIEWS.dashboard = async (main) => {
           <button class="btn ghost sm" data-del="${p.id}">🗑</button>
         </div>
       </div>`).join("") || `<div class="empty">لا توجد مشاريع — ابدأ بإنشاء مشروع</div>`}</div>`;
-  S.cleanup.push(projectsScene($("#proj3d"), stats, (p) => selectProject(p.id)));
+  const farmCard = (p) => {
+    const box = $("#farm-card");
+    if (!p) return box.classList.add("hidden");
+    const team = teamOf(p.id);
+    box.innerHTML = `<button class="icon-btn fc-x" id="fc-x">✕</button>
+      <div class="row"><span class="ring" style="--p:${p.progress};width:78px;height:78px"><div style="width:60px;height:60px;font-size:17px">${p.progress}%</div></span>
+        <div style="flex:1;min-width:0"><h3 style="margin:0">${esc(p.name)}</h3><span class="tag gold">${esc(p.competition || "مسابقة")}</span></div></div>
+      ${p.description ? `<p class="muted" style="margin:8px 0">${esc(p.description)}</p>` : ""}
+      <div class="fc-stats"><div><b>${p.done}/${p.total}</b><small>مهام منجزة</small></div><div><b style="color:${p.overdue ? "var(--red)" : "inherit"}">${p.overdue}</b><small>متأخرة</small></div>
+        <div><b>${p.end_date ? Math.max(0, daysLeft(p.end_date)) : "—"}</b><small>يوماً متبقياً</small></div></div>
+      <div class="row" style="margin:8px 0">${team.map((m) => `<span class="avatar" title="${esc(m.full_name)}${m.prole === "manager" ? " ⭐" : ""}">${esc((m.full_name || "?")[0])}</span>`).join("") || `<small class="muted">لا أعضاء بعد</small>`}</div>
+      <div class="row"><button class="btn gold" id="fc-open">📂 فتح المشروع</button><button class="btn ghost sm" id="fc-team">👥 الفريق</button><button class="btn ghost sm" id="fc-edit">✏️</button></div>`;
+    box.classList.remove("hidden");
+    $("#fc-x").onclick = () => farm.reset();
+    $("#fc-open").onclick = () => selectProject(p.id);
+    $("#fc-team").onclick = () => teamForm(S.projects.find((x) => x.id === p.id));
+    $("#fc-edit").onclick = () => projectForm(S.projects.find((x) => x.id === p.id));
+  };
+  const farm = farmScene($("#proj3d"), stats, {
+    onSelect: farmCard,
+    onHover: (p) => `<b>🫒 ${esc(p.name)}</b><br>الإنجاز: ${p.progress}% · المهام: ${p.done}/${p.total}${p.overdue ? `<br>🚩 ${p.overdue} متأخرة` : ""}<br><small>انقر لعرض التفاصيل</small>`,
+  });
+  S.cleanup.push(farm.dispose);
+  $("#farm-reset").onclick = () => farm.reset();
+  $("#farm-tour").onclick = (e) => e.currentTarget.classList.toggle("off", !farm.tour());
+  $("#farm-fs").onclick = () => (document.fullscreenElement ? document.exitFullscreen() : $("#farm-wrap").requestFullscreen?.());
   $("#new-proj").onclick = () => projectForm();
   $$("[data-open]").forEach((b) => (b.onclick = () => selectProject(b.dataset.open)));
   $$("[data-edit]").forEach((b) => (b.onclick = () => projectForm(S.projects.find((p) => p.id === b.dataset.edit))));
@@ -731,141 +771,18 @@ async function saveProjectFile(path, content, language, isNew) {
   const ex = must(await sb.from("files").select("id,content").eq("project_id", S.pid).eq("path", path).maybeSingle());
   if (ex) {
     if (isNew && !confirmBox(`الملف ${path} موجود — استبداله؟`)) return null;
-    must(await sb.from("files").update({ content, language, updated_by: S.me.id, updated_at: new Date().toISOString() }).eq("id", ex.id));
+    must(await sb.from("files").update({ content, language, ...(S.filesLegacy ? {} : { size: new Blob([content]).size }), updated_by: S.me.id, updated_at: new Date().toISOString() }).eq("id", ex.id));
     must(await sb.from("file_versions").insert({ project_id: S.pid, file_id: ex.id, path, action: "update", content, user_id: S.me.id }));
     log("عدّل الملف", path); return ex.id;
   }
-  const f = must(await sb.from("files").insert({ project_id: S.pid, path, content, language, updated_by: S.me.id }).select("id").single());
+  const f = must(await sb.from("files").insert({ project_id: S.pid, path, content, language, ...(S.filesLegacy ? {} : { size: new Blob([content]).size }), updated_by: S.me.id }).select("id").single());
   must(await sb.from("file_versions").insert({ project_id: S.pid, file_id: f.id, path, action: "create", content, user_id: S.me.id }));
   log("أنشأ الملف", path); return f.id;
 }
-VIEWS.files = async (main) => {
-  const files = must(await sb.from("files").select("id,path,language,updated_at,updated_by").eq("project_id", S.pid).order("path"));
-  const ed = canEdit();
-  main.innerHTML = head("ملفات المشروع", "مجلد مشترك — كل إضافة أو تعديل تُسجَّل باسم صاحبها ويمكن مقارنتها واسترجاعها",
-    `${ed ? `<button class="btn gold sm" id="f-new">＋ ملف جديد</button>
-      <label class="btn ghost sm" style="margin:0">⬆️ رفع ملفات<input type="file" id="f-up" multiple hidden></label>
-      <label class="btn ghost sm" style="margin:0">📁 رفع مجلد<input type="file" id="f-dir" webkitdirectory hidden></label>` : ""}
-      <button class="btn ghost sm" id="f-zip">⬇️ تنزيل المشروع ZIP</button>`) + `
-    <div class="ide">
-      <div class="tree" id="tree"></div>
-      <div class="editor-pane">
-        <div class="editor-bar"><span class="path" id="f-path">اختر ملفاً من الشجرة</span><span id="f-dirty" class="tag red hidden">غير محفوظ</span><div class="spacer"></div>
-          <select id="f-lang" style="width:auto" ${ed ? "" : "disabled"}>${langOptions("plaintext")}</select>
-          ${ed ? `<button class="btn sm" id="f-save" disabled>💾 حفظ (Ctrl+S)</button><button class="btn ghost sm" id="f-ren" disabled>✏️</button><button class="btn ghost sm" id="f-del" disabled>🗑</button>` : ""}
-          <button class="btn ghost sm" id="f-hist" disabled>🕓 السجل</button></div>
-        <div id="editor" dir="ltr"></div>
-        <div class="history hidden" id="hist"></div>
-      </div>
-    </div>`;
-  // شجرة الملفات
-  const tree = {};
-  files.forEach((f) => { let n = tree; const parts = f.path.split("/"); parts.slice(0, -1).forEach((p) => (n = n[p + "/"] ||= {})); n[parts.at(-1)] = f; });
-  const drawTree = (n, depth = 0) => Object.keys(n).sort((a, b) => (b.endsWith("/") - a.endsWith("/")) || a.localeCompare(b)).map((k) =>
-    k.endsWith("/") ? `<div class="node folder" style="padding-left:${8 + depth * 14}px">📂 ${esc(k.slice(0, -1))}</div>${drawTree(n[k], depth + 1)}`
-      : `<div class="node" data-fid="${n[k].id}" style="padding-left:${8 + depth * 14}px" title="آخر تعديل: ${esc(pname(n[k].updated_by))} — ${fmtTime(n[k].updated_at)}">📄 ${esc(k)}</div>`).join("");
-  $("#tree").innerHTML = files.length ? drawTree(tree) : `<div class="empty" style="direction:rtl">المجلد فارغ<br>${ed ? "أنشئ أول ملف ⬆️" : ""}</div>`;
-
-  const monaco = await loadMonaco();
-  const editor = monaco.editor.create($("#editor"), { value: "", language: "plaintext", theme: "vs-dark", automaticLayout: true, readOnly: true, fontSize: 14, minimap: { enabled: true } });
-  S.cleanup.push(() => editor.getModel()?.dispose(), () => editor.dispose());
-  let cur = null, saved = "";
-  const dirty = () => cur && editor.getValue() !== saved;
-  editor.onDidChangeModelContent(() => $("#f-dirty").classList.toggle("hidden", !dirty()));
-  const openFile = async (id) => {
-    if (dirty() && !confirmBox("هناك تعديلات غير محفوظة — تجاهلها؟")) return;
-    const f = must(await sb.from("files").select("*").eq("id", id).single());
-    cur = f; saved = f.content || "";
-    monaco.editor.setModelLanguage(editor.getModel(), f.language || langOf(f.path));
-    editor.setValue(saved); editor.updateOptions({ readOnly: !ed });
-    $("#f-path").textContent = f.path; $("#f-lang").value = f.language || "plaintext";
-    $$("#f-save,#f-ren,#f-del,#f-hist").forEach((b) => (b.disabled = false));
-    $$(".tree .node").forEach((n) => n.classList.toggle("active", n.dataset.fid === id));
-    $("#hist").classList.add("hidden"); $("#f-dirty").classList.add("hidden");
-  };
-  $$("[data-fid]").forEach((n) => (n.onclick = () => openFile(n.dataset.fid)));
-  $("#f-lang").onchange = () => monaco.editor.setModelLanguage(editor.getModel(), $("#f-lang").value);
-  const save = async () => {
-    if (!cur || !ed) return;
-    const content = editor.getValue(), language = $("#f-lang").value;
-    if (content === saved && language === cur.language) return toast("لا تغييرات");
-    must(await sb.from("files").update({ content, language, updated_by: S.me.id, updated_at: new Date().toISOString() }).eq("id", cur.id));
-    must(await sb.from("file_versions").insert({ project_id: S.pid, file_id: cur.id, path: cur.path, action: "update", content, user_id: S.me.id }));
-    log("عدّل الملف", cur.path); saved = content; cur.language = language;
-    $("#f-dirty").classList.add("hidden"); toast("تم الحفظ 💾");
-  };
-  if (ed) {
-    $("#f-save").onclick = () => save().catch(fail);
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => save().catch(fail));
-    $("#f-new").onclick = async () => {
-      const path = prompt("مسار الملف (يمكن إنشاء مجلدات بالشرطة /):", "src/main.py");
-      if (!path) return;
-      try { const id = await saveProjectFile(path.trim().replace(/^\/+/, ""), "", langOf(path), true); if (id) { await render(); } } catch (e) { fail(e); }
-    };
-    const upl = async (list, useRel) => {
-      let n = 0;
-      for (const f of list) {
-        const bytes = new Uint8Array(await f.slice(0, 4000).arrayBuffer());
-        if (f.size > 1024 * 1024 || bytes.includes(0)) { toast(`تخطي ${f.name} (ليس ملفاً نصياً — ارفعه في المهام)`, "err"); continue; }
-        const path = (useRel && f.webkitRelativePath) || f.name;
-        await saveProjectFile(path, await f.text(), langOf(path), false); n++;
-      }
-      toast(`تم رفع ${n} ملف`); render();
-    };
-    $("#f-up").onchange = (e) => upl([...e.target.files]).catch(fail);
-    $("#f-dir").onchange = (e) => upl([...e.target.files].filter((f) => !/(^|\/)(\.git|node_modules|__pycache__|build)\//.test(f.webkitRelativePath)), true).catch(fail);
-    $("#f-ren").onclick = async () => {
-      const np = prompt("المسار الجديد:", cur.path); if (!np || np === cur.path) return;
-      try {
-        must(await sb.from("files").update({ path: np.trim(), updated_by: S.me.id, updated_at: new Date().toISOString() }).eq("id", cur.id));
-        must(await sb.from("file_versions").insert({ project_id: S.pid, file_id: cur.id, path: np.trim(), action: "rename", content: `${cur.path} → ${np}`, user_id: S.me.id }));
-        log("أعاد تسمية", `${cur.path} → ${np}`); render();
-      } catch (e) { fail(e); }
-    };
-    $("#f-del").onclick = async () => {
-      if (!confirmBox(`حذف ${cur.path}؟ (يبقى في السجل)`)) return;
-      must(await sb.from("file_versions").insert({ project_id: S.pid, file_id: null, path: cur.path, action: "delete", content: saved, user_id: S.me.id }));
-      must(await sb.from("files").delete().eq("id", cur.id)); log("حذف الملف", cur.path); cur = null; render();
-    };
-  }
-  $("#f-hist").onclick = async () => {
-    const h = $("#hist");
-    if (!h.classList.contains("hidden")) return h.classList.add("hidden");
-    const vs = must(await sb.from("file_versions").select("*").eq("file_id", cur.id).order("created_at", { ascending: false }));
-    const AL = { create: "🟢 إنشاء", update: "🟡 تعديل", rename: "🔵 إعادة تسمية", restore: "🟣 استرجاع", delete: "🔴 حذف" };
-    h.innerHTML = vs.map((v) => `<div class="h"><b>${AL[v.action]}</b><span>${esc(pname(v.user_id))}</span><span class="muted">${fmtTime(v.created_at)}</span><div class="spacer"></div>
-      ${v.action !== "rename" ? `<button class="btn ghost sm" data-diff="${v.id}">مقارنة بالحالي</button>${ed ? `<button class="btn ghost sm" data-rest="${v.id}">استرجاع</button>` : ""}` : `<small dir="ltr">${esc(v.content)}</small>`}</div>`).join("");
-    h.classList.remove("hidden");
-    $$("[data-diff]", h).forEach((b) => (b.onclick = () => {
-      const v = vs.find((x) => x.id == b.dataset.diff);
-      openModal(`مقارنة: ${cur.path} (يسار: نسخة ${fmtTime(v.created_at)} · يمين: الحالي)`, `<div id="diff" dir="ltr" style="height:65vh"></div>`, {
-        wide: true, onOpen: () => {
-          const lang = $("#f-lang").value;
-          const de = monaco.editor.createDiffEditor($("#diff"), { theme: "vs-dark", automaticLayout: true, readOnly: true });
-          de.setModel({ original: monaco.editor.createModel(v.content || "", lang), modified: monaco.editor.createModel(editor.getValue(), lang) });
-          const obs = new MutationObserver(() => { if ($("#modal").classList.contains("hidden")) { const m = de.getModel(); de.dispose(); m.original.dispose(); m.modified.dispose(); obs.disconnect(); } });
-          obs.observe($("#modal"), { attributes: true });
-        },
-      });
-    }));
-    $$("[data-rest]", h).forEach((b) => (b.onclick = async () => {
-      const v = vs.find((x) => x.id == b.dataset.rest);
-      if (!confirmBox("استرجاع هذه النسخة؟")) return;
-      editor.setValue(v.content || "");
-      must(await sb.from("files").update({ content: v.content, updated_by: S.me.id, updated_at: new Date().toISOString() }).eq("id", cur.id));
-      must(await sb.from("file_versions").insert({ project_id: S.pid, file_id: cur.id, path: cur.path, action: "restore", content: v.content, user_id: S.me.id }));
-      saved = v.content || ""; log("استرجع نسخة سابقة من", cur.path); toast("تم الاسترجاع"); h.classList.add("hidden");
-    }));
-  };
-  $("#f-zip").onclick = async () => {
-    const all = must(await sb.from("files").select("path,content").eq("project_id", S.pid));
-    const zip = new JSZip(); all.forEach((f) => zip.file(f.path, f.content || ""));
-    const blob = await zip.generateAsync({ type: "blob" });
-    const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: `${safeName(project().name)}_${todayStr()}.zip` });
-    a.click(); URL.revokeObjectURL(a.href);
-  };
-  const before = (e) => { if (dirty()) { e.preventDefault(); e.returnValue = ""; } };
-  window.addEventListener("beforeunload", before); S.cleanup.push(() => window.removeEventListener("beforeunload", before));
+let filesWS;
+VIEWS.files = (main) => {
+  filesWS ||= createFilesView({ sb, S, $, $$, esc, toast, fail, must, openModal, closeModal, confirmBox, canEdit, pname, project, log, fmtTime, head, BUCKET, loadMonaco, signed, safeName });
+  return filesWS.view(main);
 };
 
 // ---------------------------------------------------------------- الخطة + جانت
