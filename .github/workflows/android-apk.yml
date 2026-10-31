@@ -1,0 +1,59 @@
+# يبني تطبيق أندرويد (APK) للمنصة وينشره في Releases برابط ثابت
+# التشغيل: Actions ← بناء تطبيق أندرويد ← Run workflow
+name: بناء تطبيق أندرويد
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["android-app/**", ".github/workflows/android-apk.yml"]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: تجهيز مشروع أندرويد
+        working-directory: android-app
+        run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr 'A-Z' 'a-z')
+          SITE="https://${OWNER}.github.io/${{ github.event.repository.name }}/"
+          echo "SITE=$SITE"
+          npm init -y > /dev/null
+          npm i --no-audit --no-fund @capacitor/core@6.2.3 @capacitor/cli@6.2.3 @capacitor/android@6.2.3 @capacitor/app@6.0.3 @capacitor/filesystem@6.0.4 @capacitor/share@6.0.4 @capacitor/status-bar@6.0.3 @capacitor/assets@3.0.5
+          mkdir -p www && sed "s#__SITE__#${SITE}#g" offline.html > www/index.html && cp www/index.html www/offline.html
+          cat > capacitor.config.json <<JSON
+          {
+            "appId": "academy.sanabel.teams",
+            "appName": "سنابل الفرق",
+            "webDir": "www",
+            "server": { "url": "${SITE}", "cleartext": false, "errorPath": "offline.html" },
+            "android": { "backgroundColor": "#f5ece5" }
+          }
+          JSON
+          npx cap add android
+          npx capacitor-assets generate --android --iconBackgroundColor '#f5ece5' --iconBackgroundColorDark '#16372a' --splashBackgroundColor '#f5ece5' --splashBackgroundColorDark '#16372a'
+          npx cap sync android
+      - name: بناء ملف APK
+        working-directory: android-app/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+      - name: نشر التطبيق في Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp android-app/android/app/build/outputs/apk/debug/app-debug.apk sanabel-teams.apk
+          gh release delete android-latest -y --cleanup-tag || true
+          gh release create android-latest sanabel-teams.apk --title "📱 تطبيق أندرويد — منصة الفرق" --notes "حمّل الملف sanabel-teams.apk وثبّته على هاتف أندرويد. يفتح المنصة نفسها ويستخدم الحساب نفسه — تحديثات المنصة تصل تلقائياً دون إعادة تثبيت." --latest
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sanabel-teams-apk
+          path: sanabel-teams.apk
