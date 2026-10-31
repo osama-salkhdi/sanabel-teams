@@ -39,6 +39,9 @@ jobs:
           }
           JSON
           npx cap add android
+          # 🎤 صلاحية الميكروفون للرسائل الصوتية داخل المحادثات
+          sed -i 's#</manifest>#    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\n</manifest>#' android/app/src/main/AndroidManifest.xml
+          grep -n "RECORD_AUDIO" android/app/src/main/AndroidManifest.xml
           npx capacitor-assets generate --android --iconBackgroundColor '#f5ece5' --iconBackgroundColorDark '#16372a' --splashBackgroundColor '#f5ece5' --splashBackgroundColorDark '#16372a'
           npx cap sync android
       - name: بناء ملف APK
