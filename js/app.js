@@ -4,6 +4,7 @@
 import { loginBackground, farmScene, timelineScene, TL_COLORS, TL_PRIO } from "./three-views.js";
 import { createDemoClient, resetDemo } from "./demo.js";
 import { createFilesView } from "./files-view.js";
+import { createChat } from "./chat.js";
 
 const C = window.CONFIG;
 const DEMO = C.SUPABASE_URL.includes("YOUR-") || new URLSearchParams(location.search).has("demo");
@@ -207,19 +208,19 @@ function selectProject(id) {
 
 // ---------------------------------------------------------------- التنقل
 const NAV = [
-  { sec: "الإدارة", admin: true, items: [["dashboard", "🏛️", "لوحة التحكم"], ["inbox", "📨", "الرسائل والتعميمات"], ["members", "👥", "الأعضاء والصلاحيات"], ["videos", "🎬", "فيديو شرح عن المنصة"]] },
-  { sec: "التواصل", member: true, items: [["inbox", "📨", "صندوق الوارد"], ["videos", "🎬", "فيديو شرح عن المنصة"]] },
+  { sec: "الإدارة", admin: true, items: [["dashboard", "🏛️", "لوحة التحكم"], ["chat", "💬", "المحادثات"], ["inbox", "📢", "التعميمات"], ["members", "👥", "الأعضاء والصلاحيات"], ["videos", "🎬", "فيديو شرح عن المنصة"]] },
+  { sec: "التواصل", member: true, items: [["chat", "💬", "المحادثات"], ["inbox", "📢", "التعميمات"], ["videos", "🎬", "فيديو شرح عن المنصة"]] },
   { sec: "المشروع", items: [["overview", "📊", "نظرة عامة"], ["tasks", "✅", "المهام"], ["files", "🗂️", "ملفات المشروع"], ["plan", "🗓️", "الخطة ومخطط جانت"], ["timeline", "🌐", "الخط الزمني 3D"], ["activity", "🕓", "سجل العمل"]] },
   { sec: "المخزون المعرفي", items: [["research", "🔬", "أبحاث مهمة"], ["books", "📚", "كتب مهمة"], ["misc", "🧩", "منوعات"], ["parts", "🔩", "القطع المطلوبة"], ["contacts", "📇", "أرقام مهمة"]] },
   { sec: "التقارير", admin: true, items: [["reports", "🖨️", "التقارير والتقييم"]] },
 ];
 function buildNav() {
   $("#nav").innerHTML = NAV.filter((g) => (!g.admin || isAdmin()) && (!g.member || !isAdmin())).map((g) =>
-    `<div class="sec">${g.sec}</div>` + g.items.map(([v, i, l]) => `<a href="#${v}" data-v="${v}"><i class="ico3d">${i}</i><span>${l}</span>${v === "inbox" ? `<b class="nav-badge hidden" id="nav-inbox-badge"></b>` : ""}</a>`).join("")).join("");
+    `<div class="sec">${g.sec}</div>` + g.items.map(([v, i, l]) => `<a href="#${v}" data-v="${v}"><i class="ico3d">${i}</i><span>${l}</span>${v === "inbox" || v === "chat" ? `<b class="nav-badge hidden" id="nav-${v}-badge"></b>` : ""}</a>`).join("")).join("");
   $("#menu-btn").onclick = () => $("#nav").classList.toggle("open");
 }
 const ADMIN_ONLY = ["dashboard", "members", "reports"];
-const NO_PROJECT = ["dashboard", "members", "inbox", "videos"];
+const NO_PROJECT = ["dashboard", "members", "inbox", "chat", "videos"];
 window.addEventListener("hashchange", () => { const v = location.hash.slice(1); if (v && v !== S.view && S.me) go(v, true); });
 function go(view, fromHash) {
   if (!VIEWS[view] || (ADMIN_ONLY.includes(view) && !isAdmin())) view = isAdmin() ? "dashboard" : "overview";
@@ -1138,37 +1139,45 @@ function printDoc(title, body) {
   w.document.close();
 }
 
-// ---------------------------------------------------------------- صندوق الوارد: رسائل + تعميمات + شات
-S.msgs = []; S.reads = new Set(); S.allReads = []; S.inboxSel = "ann";
+// ---------------------------------------------------------------- صندوق الوارد: تعميمات + محادثات (نمط تيليغرام في chat.js)
+S.msgs = []; S.reads = new Set(); S.allReads = []; S.groups = []; S.groupMembers = []; S.chatV2 = true;
 const myProjects = () => S.memberships.filter((m) => m.user_id === S.me.id).map((m) => m.project_id);
 const annVisible = (m) => isAdmin() || m.project_id == null || myProjects().includes(m.project_id);
-const isUnread = (m) => m.sender !== S.me.id && !S.reads.has(m.id) && (m.kind === "announcement" ? annVisible(m) : m.recipient === S.me.id);
+const inMyGroup = (gid) => S.groupMembers.some((x) => x.group_id === gid && x.user_id === S.me.id);
+const isUnread = (m) => m.sender !== S.me.id && !S.reads.has(m.id) && (m.kind === "announcement" ? annVisible(m) : m.group_id ? inMyGroup(m.group_id) : m.recipient === S.me.id);
 function chatPeople() {
   if (isAdmin()) return S.profiles.filter((p) => p.id !== S.me.id);
   const mates = new Set(S.memberships.filter((m) => myProjects().includes(m.project_id)).map((m) => m.user_id));
   return S.profiles.filter((p) => p.id !== S.me.id && (p.role === "admin" || mates.has(p.id)));
 }
 async function loadMessages() {
-  const [m, r] = await Promise.all([
-    sb.from("messages").select("*").order("created_at", { ascending: true }).limit(3000),
-    sb.from("message_reads").select("message_id,user_id"),
+  const [m, r, g, gm] = await Promise.all([
+    sb.from("messages").select("*").order("created_at", { ascending: false }).limit(4000),
+    sb.from("message_reads").select("*"),
+    sb.from("chat_groups").select("*").order("created_at"),
+    sb.from("chat_group_members").select("*"),
   ]);
-  S.msgs = must(m); S.allReads = must(r);
+  S.msgs = must(m).reverse(); S.allReads = must(r);
+  S.chatV2 = !g.error && !gm.error;
+  S.groups = g.error ? [] : g.data || []; S.groupMembers = gm.error ? [] : gm.data || [];
   S.reads = new Set(S.allReads.filter((x) => x.user_id === S.me.id).map((x) => x.message_id));
   updateBell();
 }
 function updateBell() {
-  const n = S.msgs.filter(isUnread).length;
+  const un = S.msgs.filter(isUnread);
+  const nAnn = un.filter((m) => m.kind === "announcement").length, nChat = un.length - nAnn, n = un.length;
   const b = $("#inbox-badge"); b.textContent = n > 99 ? "99+" : n; b.classList.toggle("hidden", !n);
   $("#inbox-btn").classList.toggle("ringing", n > 0);
-  const nb = $("#nav-inbox-badge"); if (nb) { nb.textContent = n; nb.classList.toggle("hidden", !n); }
+  [["inbox", nAnn], ["chat", nChat]].forEach(([v, k]) => { const nb = $(`#nav-${v}-badge`); if (nb) { nb.textContent = k > 99 ? "99+" : k; nb.classList.toggle("hidden", !k); } });
   document.title = (n ? `(${n}) ` : "") + C.PLATFORM_NAME;
 }
 async function markRead(list) {
   const ids = list.filter(isUnread).map((m) => m.id);
   if (!ids.length) return;
   ids.forEach((id) => S.reads.add(id)); updateBell();
-  await sb.from("message_reads").upsert(ids.map((id) => ({ message_id: id, user_id: S.me.id })), { onConflict: "message_id,user_id", ignoreDuplicates: true });
+  const rows = ids.map((id) => ({ message_id: id, user_id: S.me.id }));
+  rows.forEach((r) => S.allReads.push({ ...r, read_at: new Date().toISOString() }));
+  await sb.from("message_reads").upsert(rows, { onConflict: "message_id,user_id", ignoreDuplicates: true });
 }
 function ding() {
   try {
@@ -1179,112 +1188,107 @@ function ding() {
     o.start(); o.stop(a.currentTime + 0.5);
   } catch {}
 }
+const msgText = (m) => (m.media_type === "image" ? "🖼 صورة " : m.media_type === "audio" ? "🎤 رسالة صوتية " : m.media_type === "file" ? "📎 ملف " : "") + String(m.body || "");
 function notifyMsg(m) {
-  const title = m.kind === "announcement" ? `📢 تعميم جديد: ${m.subject || ""}` : `💬 رسالة من ${pname(m.sender)}`;
-  toast(`${title} — ${String(m.body).slice(0, 70)}`); ding();
+  if (S.view === "chat" && chatUI?.isOpen(m)) { ding(); return; }
+  const g = m.group_id && S.groups.find((x) => x.id === m.group_id);
+  const title = m.kind === "announcement" ? `📢 تعميم جديد: ${m.subject || ""}` : g ? `💬 ${pname(m.sender)} في «${g.name}»` : `💬 رسالة من ${pname(m.sender)}`;
+  toast(`${title} — ${msgText(m).slice(0, 70)}`); ding();
   if ("Notification" in window && Notification.permission === "granted" && document.hidden)
-    try { new Notification(title, { body: String(m.body).slice(0, 140), icon: "assets/favicon.png" }); } catch {}
+    try { new Notification(title, { body: msgText(m).slice(0, 140), icon: "assets/favicon.png" }); } catch {}
 }
+let chatUI = null;
+const chatRefresh = () => { if (S.view === "chat") chatUI?.refresh(); if (S.view === "inbox") renderInbox(); };
 function initInbox() {
-  $("#inbox-btn").onclick = () => go("inbox");
-  loadMessages().catch(fail);
-  if (S.inboxChannel) sb.removeChannel(S.inboxChannel);
-  S.inboxChannel = sb.channel("inbox-" + S.me.id)
-    .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, (p) => {
-      const m = p.new; if (S.msgs.some((x) => x.id === m.id)) return;
-      S.msgs.push(m);
-      if (isUnread(m)) notifyMsg(m);
-      updateBell();
-      if (S.view === "inbox") renderInbox();
-    }).subscribe();
+  chatUI ||= createChat({ sb, S, $, $$, esc, toast, fail, must, openModal, closeModal, isAdmin, prof, pname, markRead, chatPeople, isUnread, DEMO, reloadMessages: async () => { await loadMessages(); } });
+  $("#inbox-btn").onclick = () => {
+    const un = S.msgs.filter(isUnread);
+    go(un.length && !un.some((m) => m.kind === "announcement") ? "chat" : un.some((m) => m.kind === "announcement") ? "inbox" : "chat");
+  };
+  loadMessages().catch(fail).finally(() => { subscribeInbox(); chatUI.initPresence(); });
   clearInterval(S.inboxPoll);
   S.inboxPoll = setInterval(async () => {
-    const before = S.msgs.filter(isUnread).length;
+    const sigOf = () => S.msgs.length + ":" + S.allReads.length + ":" + S.groups.length + ":" + S.msgs.filter((m) => m.edited_at).map((m) => m.edited_at).join();
+    const before = S.msgs.filter(isUnread).length, sig = sigOf();
     await loadMessages().catch(() => {});
     const now = S.msgs.filter(isUnread);
     if (now.length > before) notifyMsg(now.at(-1));
-    if (S.view === "inbox" && now.length !== before) renderInbox();
-  }, 45000);
+    if (sig !== sigOf() || now.length !== before) chatRefresh();
+  }, 30000);
   if ("Notification" in window && Notification.permission === "default") setTimeout(() => Notification.requestPermission().catch(() => {}), 5000);
 }
+function subscribeInbox() {
+  if (S.inboxChannel) sb.removeChannel(S.inboxChannel);
+  let ch = sb.channel("inbox-" + S.me.id)
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, (p) => {
+      const m = p.new; if (S.msgs.some((x) => x.id === m.id)) return;
+      S.msgs.push(m);
+      chatUI.onIncoming(m);
+      if (isUnread(m)) notifyMsg(m);
+      updateBell(); chatRefresh();
+    })
+    .on("postgres_changes", { event: "UPDATE", schema: "public", table: "messages" }, (p) => {
+      const m = S.msgs.find((x) => x.id === p.new.id); if (m) Object.assign(m, p.new); else S.msgs.push(p.new);
+      chatRefresh();
+    })
+    .on("postgres_changes", { event: "DELETE", schema: "public", table: "messages" }, (p) => {
+      const id = p.old?.id; if (id == null) return;
+      S.msgs = S.msgs.filter((x) => x.id !== id); updateBell(); chatRefresh();
+    });
+  // الجداول الجديدة تُراقَب فقط بعد تشغيل chat.sql (وإلا تتعطل القناة كلها)
+  if (S.chatV2) ch = ch
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "message_reads" }, (p) => {
+      const r = p.new; if (S.allReads.some((x) => x.message_id === r.message_id && x.user_id === r.user_id)) return;
+      S.allReads.push(r); if (r.user_id === S.me.id) { S.reads.add(r.message_id); updateBell(); }
+      if (S.view === "chat") chatUI.refresh();
+    })
+    .on("postgres_changes", { event: "*", schema: "public", table: "chat_group_members" }, async () => { await loadMessages().catch(() => {}); chatRefresh(); })
+    .on("postgres_changes", { event: "*", schema: "public", table: "chat_groups" }, async () => { await loadMessages().catch(() => {}); chatRefresh(); });
+  S.inboxChannel = ch.subscribe();
+}
+VIEWS.chat = async (main) => {
+  if (!S.msgs.length) await loadMessages();
+  S.cleanup.push(chatUI.mount(main));
+};
 VIEWS.inbox = async (main) => {
   await loadMessages();
-  main.innerHTML = head(isAdmin() ? "📨 الرسائل والتعميمات" : "📨 صندوق الوارد",
-    isAdmin() ? "أرسل تعميماً للجميع أو لفريق مشروع، وتراسل مع كل عضو مباشرة" : "تعميمات المشرف ومحادثاتك مع المشرف وزملاء فريقك") +
-    `<div class="inbox"><div class="inbox-list" id="ib-list"></div><div class="inbox-pane" id="ib-pane"></div></div>`;
+  const nChat = S.msgs.filter((m) => m.kind === "chat" && isUnread(m)).length;
+  main.innerHTML = head("📢 التعميمات", isAdmin() ? "أرسل تعميماً لجميع الأعضاء أو لفريق مشروع محدد، وتابع من قرأه" : "تعميمات المشرف لجميع الأعضاء ولفريقك",
+    `<button class="btn ghost" id="to-chat">💬 المحادثات${nChat ? ` <span class="tag red">${nChat}</span>` : ""}</button>`) +
+    `<div class="ann-wrap" id="ib-pane"></div>`;
+  $("#to-chat").onclick = () => go("chat");
   renderInbox();
 };
 function renderInbox() {
-  const list = $("#ib-list"), pane = $("#ib-pane"); if (!list) return;
-  const draft = $("#chat-form textarea")?.value || "";
+  const pane = $("#ib-pane"); if (!pane) return;
   const anns = S.msgs.filter((m) => m.kind === "announcement" && annVisible(m));
-  const unAnn = anns.filter(isUnread).length;
-  const conv = (pid) => S.msgs.filter((m) => m.kind === "chat" && ((m.sender === pid && m.recipient === S.me.id) || (m.sender === S.me.id && m.recipient === pid)));
-  const people = chatPeople().map((p) => { const c = conv(p.id); return { p, last: c.at(-1), un: c.filter(isUnread).length }; })
-    .sort((a, b) => (b.last?.created_at || "").localeCompare(a.last?.created_at || "") || (b.p.role === "admin") - (a.p.role === "admin"));
-  list.innerHTML = `<div class="ib-item ${S.inboxSel === "ann" ? "on" : ""}" data-sel="ann"><span class="ib-av ann">📢</span>
-      <div><b>التعميمات</b><small>${anns.length} تعميم${unAnn ? ` · ${unAnn} جديد` : ""}</small></div>${unAnn ? `<i class="ib-un">${unAnn}</i>` : ""}</div>
-    <div class="sec-t">المحادثات</div>` + people.map(({ p, last, un }) => `
-    <div class="ib-item ${S.inboxSel === p.id ? "on" : ""}" data-sel="${p.id}"><span class="ib-av ${p.role === "admin" ? "gold" : ""}">${esc((p.full_name || p.username)[0])}</span>
-      <div><b>${esc(p.full_name)}</b>${p.role === "admin" ? ` <span class="tag gold">المشرف</span>` : ""}
-      <small>${last ? esc(((last.sender === S.me.id ? "أنت: " : "") + last.body).slice(0, 42)) : "ابدأ محادثة"}</small></div>${un ? `<i class="ib-un">${un}</i>` : ""}</div>`).join("");
-  $$("[data-sel]", list).forEach((el) => (el.onclick = () => { S.inboxSel = el.dataset.sel; renderInbox(); }));
-
-  if (S.inboxSel === "ann") {
-    pane.innerHTML = `<div class="pane-scroll">${isAdmin() ? `<form id="ann-form" class="card ann-compose"><h3>📢 تعميم جديد</h3>
-        <div class="grid2"><label>العنوان<input name="subject" required placeholder="مثال: اجتماع الفريق يوم الخميس"></label>
-        <label>يُرسل إلى<select name="project_id"><option value="">📣 جميع الأعضاء</option>${S.projects.map((p) => `<option value="${p.id}">فريق: ${esc(p.name)}</option>`).join("")}</select></label></div>
-        <label>نص التعميم<textarea name="body" required></textarea></label>
-        <div class="form-actions"><button class="btn gold pulse" type="submit">📤 إرسال التعميم</button></div></form>` : ""}
-      ${anns.slice().reverse().map((m) => {
-        const readers = S.allReads.filter((r) => r.message_id === m.id).length;
-        const target = m.project_id ? `فريق ${S.projects.find((p) => p.id === m.project_id)?.name || ""}` : "الجميع";
-        return `<div class="ann ${isUnread(m) ? "new" : ""}"><div class="row"><span class="ann-ico">📢</span><b>${esc(m.subject || "تعميم")}</b>${isUnread(m) ? `<span class="tag red">جديد</span>` : ""}
-          <div class="spacer"></div><span class="tag gold">إلى: ${esc(target)}</span>${isAdmin() ? `<button class="icon-btn" data-delmsg="${m.id}" title="حذف">🗑</button>` : ""}</div>
-          <div class="ann-body">${esc(m.body)}</div><small class="muted">${esc(pname(m.sender))} · ${fmtTime(m.created_at)}${isAdmin() ? ` · 👁 قرأه ${readers}` : ""}</small></div>`;
-      }).join("") || `<div class="empty">لا تعميمات بعد 📭</div>`}</div>`;
-    const f = $("#ann-form");
-    if (f) f.onsubmit = async (e) => {
-      e.preventDefault(); const d = Object.fromEntries(new FormData(f));
-      try {
-        const m = must(await sb.from("messages").insert({ kind: "announcement", sender: S.me.id, subject: d.subject, body: d.body, project_id: d.project_id || null }).select().single());
-        if (!S.msgs.some((x) => x.id === m.id)) S.msgs.push(m);
-        toast("تم إرسال التعميم ✅"); renderInbox();
-      } catch (er) { fail(er); }
-    };
-    $$("[data-delmsg]", pane).forEach((b) => (b.onclick = async () => {
-      if (!confirmBox("حذف هذا التعميم؟")) return;
-      must(await sb.from("messages").delete().eq("id", +b.dataset.delmsg || b.dataset.delmsg));
-      S.msgs = S.msgs.filter((m) => String(m.id) !== b.dataset.delmsg); renderInbox();
-    }));
-    setTimeout(() => markRead(anns), 1500);
-    return;
-  }
-  const other = prof(S.inboxSel);
-  if (!other) { S.inboxSel = "ann"; return renderInbox(); }
-  const c = conv(other.id);
-  pane.innerHTML = `<div class="chat-head"><span class="ib-av ${other.role === "admin" ? "gold" : ""}">${esc((other.full_name || other.username)[0])}</span>
-      <div><b>${esc(other.full_name)}</b><small>${other.role === "admin" ? "المشرف" : esc(other.specialty || "عضو فريق")}</small></div></div>
-    <div class="chat-body" id="chat-body">${c.map((m, i) => {
-      const day = new Date(m.created_at).toDateString(), prevDay = i ? new Date(c[i - 1].created_at).toDateString() : "";
-      return `${day !== prevDay ? `<div class="chat-day">${fmtDate(m.created_at)}</div>` : ""}<div class="bubble ${m.sender === S.me.id ? "me" : "them"}">
-        <div>${esc(m.body).replace(/\n/g, "<br>")}</div><small>${new Date(m.created_at).toLocaleTimeString("ar-SY-u-nu-latn", { hour: "2-digit", minute: "2-digit" })}</small></div>`;
-    }).join("") || `<div class="empty">لا رسائل بعد — اكتب أول رسالة 👋</div>`}</div>
-    <form id="chat-form" class="chat-input"><textarea name="body" rows="1" placeholder="اكتب رسالة… (Enter للإرسال، Shift+Enter لسطر جديد)" required></textarea><button class="btn gold btn-send" type="submit">➤</button></form>`;
-  const body = $("#chat-body"); body.scrollTop = body.scrollHeight;
-  const ta = $("#chat-form textarea"); ta.value = draft; ta.focus();
-  ta.onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#chat-form").requestSubmit(); } };
-  ta.oninput = () => { ta.style.height = "auto"; ta.style.height = Math.min(140, ta.scrollHeight) + "px"; };
-  $("#chat-form").onsubmit = async (e) => {
-    e.preventDefault(); const text = ta.value.trim(); if (!text) return;
-    ta.value = "";
+  pane.innerHTML = `${isAdmin() ? `<form id="ann-form" class="card ann-compose"><h3>📢 تعميم جديد</h3>
+      <div class="grid2"><label>العنوان<input name="subject" required placeholder="مثال: اجتماع الفريق يوم الخميس"></label>
+      <label>يُرسل إلى<select name="project_id"><option value="">📣 جميع الأعضاء</option>${S.projects.map((p) => `<option value="${p.id}">فريق: ${esc(p.name)}</option>`).join("")}</select></label></div>
+      <label>نص التعميم<textarea name="body" required></textarea></label>
+      <div class="form-actions"><button class="btn gold pulse" type="submit">📤 إرسال التعميم</button></div></form>` : ""}
+    ${anns.slice().reverse().map((m) => {
+      const readers = S.allReads.filter((r) => r.message_id === m.id).length;
+      const target = m.project_id ? `فريق ${S.projects.find((p) => p.id === m.project_id)?.name || ""}` : "الجميع";
+      return `<div class="ann ${isUnread(m) ? "new" : ""}"><div class="row"><span class="ann-ico">📢</span><b>${esc(m.subject || "تعميم")}</b>${isUnread(m) ? `<span class="tag red">جديد</span>` : ""}
+        <div class="spacer"></div><span class="tag gold">إلى: ${esc(target)}</span>${isAdmin() ? `<button class="icon-btn" data-delmsg="${m.id}" title="حذف">🗑</button>` : ""}</div>
+        <div class="ann-body">${esc(m.body)}</div><small class="muted">${esc(pname(m.sender))} · ${fmtTime(m.created_at)}${isAdmin() ? ` · 👁 قرأه ${readers}` : ""}</small></div>`;
+    }).join("") || `<div class="empty">لا تعميمات بعد 📭</div>`}`;
+  const f = $("#ann-form");
+  if (f) f.onsubmit = async (e) => {
+    e.preventDefault(); const d = Object.fromEntries(new FormData(f));
     try {
-      const m = must(await sb.from("messages").insert({ kind: "chat", sender: S.me.id, recipient: other.id, body: text }).select().single());
+      const m = must(await sb.from("messages").insert({ kind: "announcement", sender: S.me.id, subject: d.subject, body: d.body, project_id: d.project_id || null }).select().single());
       if (!S.msgs.some((x) => x.id === m.id)) S.msgs.push(m);
-      renderInbox();
-    } catch (er) { ta.value = text; fail(er); }
+      toast("تم إرسال التعميم ✅"); renderInbox();
+    } catch (er) { fail(er); }
   };
-  markRead(c);
+  $$("[data-delmsg]", pane).forEach((b) => (b.onclick = async () => {
+    if (!confirmBox("حذف هذا التعميم؟")) return;
+    must(await sb.from("messages").delete().eq("id", +b.dataset.delmsg || b.dataset.delmsg));
+    S.msgs = S.msgs.filter((m) => String(m.id) !== b.dataset.delmsg); renderInbox();
+  }));
+  setTimeout(() => markRead(anns), 1500);
 }
 
 // ---------------------------------------------------------------- أرقام مهمة (مجتمع المهتمين)

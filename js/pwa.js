@@ -153,6 +153,7 @@ if (NATIVE) {
   };
   // زر الرجوع في أندرويد
   P.App?.addListener("backButton", () => {
+    if (typeof window.__chatBack === "function" && window.__chatBack()) return;
     const vis = (sel) => { const el = document.querySelector(sel); return el && !el.classList.contains("hidden") ? el : null; };
     if (document.querySelector(".ctx-menu")) return document.querySelectorAll(".ctx-menu").forEach((m) => m.remove());
     if (vis("#bk-ov")) return document.getElementById("bk-ov").classList.add("hidden");

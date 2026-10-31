@@ -3,7 +3,7 @@
 //  يُفعَّل تلقائياً ما دام js/config.js لم يُعبَّأ، أو بإضافة ?demo للرابط
 // =====================================================================
 const KEY = "sanabel-demo-db";
-const VERSION = 3;
+const VERSION = 4;
 const uid = () => crypto.randomUUID();
 const now = () => new Date().toISOString();
 const day = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
@@ -21,7 +21,7 @@ const DEFAULTS = {
 const NUMERIC_ID = ["activity", "file_versions", "messages"];
 
 function seed() {
-  const A = uid(), M1 = uid(), M2 = uid(), M3 = uid(), P1 = uid(), P2 = uid(), G1 = uid(), G2 = uid(), G3 = uid();
+  const CG = uid(), A = uid(), M1 = uid(), M2 = uid(), M3 = uid(), P1 = uid(), P2 = uid(), G1 = uid(), G2 = uid(), G3 = uid();
   const T = (o) => ({ id: uid(), project_id: P1, created_at: now(), updated_at: now(), ...DEFAULTS.tasks, ...o });
   const tasks = [
     T({ title: "دراسة أنواع حساسات المسافة", type: "research", status: "done", progress: 100, assignee: M1, start_date: day(-20), due_date: day(-12), completed_at: day(-13) + "T10:00:00Z", score: 9, feedback: "بحث ممتاز ومنظم", goal_id: G1 }),
@@ -101,8 +101,15 @@ function seed() {
       { id: 4, kind: "chat", sender: A, recipient: M1, project_id: null, body: "ممتاز يا أحمد 👌 جرّب تقليل Kd قليلاً وارفع النتائج.", created_at: day(-1) + "T19:20:00Z" },
       { id: 5, kind: "chat", sender: M2, recipient: A, project_id: null, body: "انتهيت من التصميم، أرسلته للمراجعة.", created_at: day(0) + "T08:15:00Z" },
       { id: 6, kind: "chat", sender: M3, recipient: M1, project_id: null, body: "أحمد، متى تجهز معايرة المحركات؟", created_at: day(0) + "T10:40:00Z" },
+      { id: 7, kind: "chat", sender: A, group_id: CG, body: "👋 أهلاً بكم في مجموعة «فريق روبوت الإنقاذ»", created_at: day(-2) + "T09:00:00Z" },
+      { id: 8, kind: "chat", sender: M3, group_id: CG, body: "وزّعت مهام الأسبوع على اللوحة، راجعوها لو سمحتم 🙏", created_at: day(-2) + "T09:05:00Z" },
+      { id: 9, kind: "chat", sender: M1, group_id: CG, body: "تمام، أنا على معايرة PID", created_at: day(-2) + "T09:06:00Z" },
+      { id: 10, kind: "chat", sender: M2, group_id: CG, body: "والتصميم جاهز للمراجعة غداً", created_at: day(-2) + "T09:07:30Z" },
+      { id: 11, kind: "chat", sender: A, group_id: CG, reply_to: 10, body: "ممتاز يا سارة، أرسليه هنا بعد التصدير", created_at: day(0) + "T08:30:00Z" },
     ],
-    message_reads: [{ message_id: 4, user_id: M1 }],
+    message_reads: [{ message_id: 4, user_id: M1 }, { message_id: 7, user_id: M1 }, { message_id: 7, user_id: M3 }, { message_id: 8, user_id: A }, { message_id: 9, user_id: A }, { message_id: 10, user_id: A }],
+    chat_groups: [{ id: CG, name: "فريق روبوت الإنقاذ", description: "مجموعة تنسيق أعضاء فريق الروبوت", emoji: "🤖", color: "#1e4a38", created_by: A, created_at: day(-2) + "T08:59:00Z" }],
+    chat_group_members: [A, M1, M2, M3].map((u) => ({ group_id: CG, user_id: u })),
     contacts: [
       { id: uid(), project_id: P1, name: "م. خالد العلي", title: "مهندس ميكاترونيك", organization: "جامعة دمشق", phone: "+963 944 123 456", whatsapp: "", telegram: "@khaled_mech", email: "", links: "https://www.linkedin.com/", tags: "روبوتات, خبير", notes: "مستعد لمراجعة التصميم الميكانيكي", user_id: A, created_at: now() },
       { id: uid(), project_id: P1, name: "متجر القطع الإلكترونية", title: "مورد قطع", organization: "دمشق - البحصة", phone: "+963 11 222 3344", whatsapp: "+963 933 222 334", telegram: "", email: "", links: "https://www.facebook.com/", tags: "مورد قطع", notes: "خصم للطلاب", user_id: M1, created_at: now() },
@@ -124,6 +131,8 @@ persist();
 function cascade(table, rows) {
   const ids = rows.map((r) => r.id);
   if (table === "projects") for (const t of Object.keys(db)) if (Array.isArray(db[t]) && t !== "projects") db[t] = db[t].filter((r) => !ids.includes(r.project_id));
+  if (table === "chat_groups") { db.chat_group_members = (db.chat_group_members || []).filter((r) => !ids.includes(r.group_id)); db.messages = db.messages.filter((r) => !ids.includes(r.group_id)); }
+  if (table === "messages") db.messages.forEach((r) => { if (ids.includes(r.reply_to)) r.reply_to = null; });
   if (table === "tasks") db.submissions = db.submissions.filter((r) => !ids.includes(r.task_id));
   if (table === "profiles") db.project_members = db.project_members.filter((r) => !ids.includes(r.user_id));
 }
@@ -215,7 +224,7 @@ export function createDemoClient() {
         }
       },
     },
-    channel: () => { const ch = { on: () => ch, subscribe: (cb) => { setTimeout(() => cb && cb("SUBSCRIBED"), 0); return ch; }, track: async () => {}, presenceState: () => ({}) }; return ch; },
+    channel: () => { const ch = { on: () => ch, subscribe: (cb) => { setTimeout(() => cb && cb("SUBSCRIBED"), 0); return ch; }, track: async () => {}, send: async () => {}, presenceState: () => ({}) }; return ch; },
     removeChannel: () => {},
   };
 }
