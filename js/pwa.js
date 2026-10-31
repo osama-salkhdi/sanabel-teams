@@ -82,10 +82,73 @@ if (NATIVE) {
     if (this.hasAttribute("download") && /^(blob:|data:)/.test(this.href)) { saveNative(this.href, this.getAttribute("download")); return; }
     return origClick.call(this);
   };
-  // النوافذ الجديدة: الروابط تفتح في المتصفح، والطباعة متاحة من نسخة الويب
+  // 🖨️ الطباعة داخل التطبيق: التقرير يتحول إلى ملف PDF (A4) ثم نافذة حفظ/مشاركة/طباعة
+  const LIBS = ["https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js", "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"];
+  // محرر الأكواد يعرّف define (AMD) فنخفيه مؤقتاً حتى تُسجَّل المكتبة على window
+  const loadJs = (src) => new Promise((res, rej) => {
+    const def = window.define; window.define = undefined;
+    const done = (f) => () => { window.define = def; f(); };
+    const s = document.createElement("script"); s.src = src;
+    s.onload = done(res); s.onerror = done(() => rej(new Error("تعذّر تحميل مكتبة PDF — تحقق من الإنترنت")));
+    document.head.appendChild(s);
+  });
+  let busy = false;
+  async function reportToPdf(html) {
+    if (busy) return; busy = true;
+    const fr = document.createElement("iframe");
+    try {
+      toast("⏳ تجهيز التقرير PDF…");
+      if (!window.html2canvas) await loadJs(LIBS[0]);
+      if (!window.jspdf) await loadJs(LIBS[1]);
+      const title = (html.match(/<title>([^<]*)<\/title>/) || [])[1] || "report";
+      html = html.replace(/<script>[\s\S]*?<\/script>/g, "").replace("</style>", "body{margin:0;padding:0 2px}tr,li,.boxes,.meta,.big,.sign{break-inside:avoid}</style>");
+      const W = 760; // عرض صفحة A4 بالبكسل (بعد الهوامش)
+      fr.style.cssText = `position:fixed;left:-20000px;top:0;width:${W}px;height:1200px;border:0;visibility:hidden`;
+      document.body.appendChild(fr);
+      const d = fr.contentDocument; d.open(); d.write(html); d.close();
+      await Promise.race([new Promise((r) => (d.readyState === "complete" ? r() : fr.addEventListener("load", r, { once: true }))), new Promise((r) => setTimeout(r, 6000))]);
+      await Promise.race([d.fonts.ready, new Promise((r) => setTimeout(r, 4000))]);
+      await Promise.race([Promise.all([...d.images].map((im) => im.complete ? 0 : new Promise((r) => { im.onload = im.onerror = r; }))), new Promise((r) => setTimeout(r, 5000))]);
+      await new Promise((r) => setTimeout(r, 300));
+      // أشرطة الإنجاز: تُرسم كتدرّج لوني حتى تظهر بدقة في PDF
+      d.querySelectorAll(".pb").forEach((pb) => { const v = parseFloat(pb.firstElementChild?.style.width) || 0; pb.innerHTML = ""; pb.style.background = `linear-gradient(to left, #c39a5c ${v}%, #e3ece6 ${v}%)`; });
+      const body = d.body, H = Math.ceil(body.scrollHeight);
+      fr.style.height = H + "px";
+      // نقاط قطع الصفحات: بين الأسطر والعناوين وليس في منتصفها
+      const bTop = body.getBoundingClientRect().top;
+      const cuts = [...body.querySelectorAll("tr,li,h3,header,.meta,.big,.boxes,.comment,.sign,footer,p,table")].map((e) => Math.round(e.getBoundingClientRect().bottom - bTop)).sort((a, b) => a - b);
+      const scale = 2;
+      const canvas = await window.html2canvas(body, { scale, width: W, windowWidth: W, height: H, windowHeight: H, backgroundColor: "#ffffff", useCORS: true, logging: false });
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait", compress: true });
+      const M = 12, pw = 210 - 2 * M, ph = 297 - 2 * M, pagePx = Math.floor(ph * W / pw);
+      let y = 0, first = true;
+      while (y < H - 2) {
+        let end = Math.min(y + pagePx, H);
+        if (end < H) { const ok = cuts.filter((c) => c > y + pagePx * 0.5 && c <= end); if (ok.length) end = ok[ok.length - 1]; }
+        const sl = document.createElement("canvas"); sl.width = W * scale; sl.height = (end - y) * scale;
+        const cx = sl.getContext("2d"); cx.fillStyle = "#fff"; cx.fillRect(0, 0, sl.width, sl.height);
+        cx.drawImage(canvas, 0, y * scale, W * scale, (end - y) * scale, 0, 0, W * scale, (end - y) * scale);
+        if (!first) pdf.addPage(); first = false;
+        pdf.addImage(sl.toDataURL("image/jpeg", 0.92), "JPEG", M, M, pw, (end - y) * pw / W);
+        y = end;
+      }
+      const n = pdf.getNumberOfPages();
+      for (let i = 1; i <= n; i++) { pdf.setPage(i); pdf.setFontSize(8); pdf.setTextColor(150); pdf.text(`${i} / ${n}`, 105, 292, { align: "center" }); }
+      pdf.setProperties({ title });
+      const day = new Date().toISOString().slice(0, 10);
+      const kind = /قطع/.test(title) ? "parts" : /المشروع/.test(title) ? "project-report" : "member-report";
+      await saveNative(URL.createObjectURL(pdf.output("blob")), `sanabel_${kind}_${day}.pdf`);
+    } catch (e) { toast("تعذّر إنشاء PDF: " + (e?.message || e)); }
+    finally { fr.remove(); busy = false; }
+  }
+  // النوافذ الجديدة: الروابط تفتح في المتصفح، ونافذة الطباعة تتحول إلى PDF
   const origOpen = window.open;
   window.open = function (url, ...rest) {
-    if (!url) { toast("🖨️ طباعة التقارير متاحة من نسخة الويب على اللابتوب"); return null; }
+    if (!url) {
+      let buf = "";
+      return { closed: false, focus() {}, close() {}, print() {}, document: { write: (s) => { buf += s; }, writeln: (s) => { buf += s + "\n"; }, open() {}, close: () => reportToPdf(buf) } };
+    }
     try { const a = document.createElement("a"); a.href = url; a.target = "_blank"; a.rel = "noopener"; origClick.call(a); return null; } catch { return origOpen.call(window, url, ...rest); }
   };
   // زر الرجوع في أندرويد
